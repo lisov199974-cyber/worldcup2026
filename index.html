@@ -491,18 +491,25 @@ function goScreen(name, nbId) {
 
 function formatDate(dt) {
   const d = new Date(dt);
-  return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+  const moscow = new Date(d.getTime() + 3 * 60 * 60 * 1000);
+  return moscow.getUTCDate() + ' ' + ['янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек'][moscow.getUTCMonth()];
 }
 
 function formatTime(dt) {
   const d = new Date(dt);
-  return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+  // Moscow time UTC+3
+  const moscow = new Date(d.getTime() + 3 * 60 * 60 * 1000);
+  const h = String(moscow.getUTCHours()).padStart(2,'0');
+  const m = String(moscow.getUTCMinutes()).padStart(2,'0');
+  return h + ':' + m;
 }
 
 function groupMatchesByDate(arr) {
   const map = {};
   arr.forEach(m => {
-    const key = new Date(m.match_date).toDateString();
+    // Group by Moscow date
+    const moscow = new Date(new Date(m.match_date).getTime() + 3*60*60*1000);
+    const key = moscow.getUTCFullYear() + '-' + moscow.getUTCMonth() + '-' + moscow.getUTCDate();
     if (!map[key]) map[key] = [];
     map[key].push(m);
   });
@@ -1179,14 +1186,20 @@ function renderMatches() {
   const byDate = groupMatchesByDate(upcoming);
   let html = '';
 
+  const MONTHS_LONG = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
+  const DAYS = ['воскресенье','понедельник','вторник','среда','четверг','пятница','суббота'];
   Object.entries(byDate).forEach(([dateKey, dayMatches]) => {
-    const d = new Date(dayMatches[0].match_date);
-    const today = new Date();
-    const isToday = d.toDateString() === today.toDateString();
-    const isTomorrow = d.toDateString() === new Date(today.getTime() + 86400000).toDateString();
-    const label = isToday ? 'Сегодня, ' + d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }) :
-                  isTomorrow ? 'Завтра, ' + d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' }) :
-                  d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', weekday: 'long' });
+    const d = new Date(new Date(dayMatches[0].match_date).getTime() + 3*60*60*1000);
+    const now = new Date(new Date().getTime() + 3*60*60*1000);
+    const todayKey = now.getUTCFullYear() + '-' + now.getUTCMonth() + '-' + now.getUTCDate();
+    const tomorrowD = new Date(now.getTime() + 86400000);
+    const tomorrowKey = tomorrowD.getUTCFullYear() + '-' + tomorrowD.getUTCMonth() + '-' + tomorrowD.getUTCDate();
+    const dateStr = d.getUTCDate() + ' ' + MONTHS_LONG[d.getUTCMonth()];
+    const isToday = dateKey === todayKey;
+    const isTomorrow = dateKey === tomorrowKey;
+    const label = isToday ? 'Сегодня, ' + dateStr :
+                  isTomorrow ? 'Завтра, ' + dateStr :
+                  DAYS[d.getUTCDay()] + ', ' + dateStr;
 
     html += '<div class="date-hdr"><div class="date-hdr-text">' + label + '</div><div class="date-hdr-line"></div></div>';
 
