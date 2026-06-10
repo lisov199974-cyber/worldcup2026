@@ -862,6 +862,12 @@ const TEAM_ID_MAP = {
 };
 
 
+function renderForm5(results) {
+  if (!results || !results.length) return '';
+  const labels = { w:'В', d:'Н', l:'П' };
+  return results.map(r => '<div class="l5 ' + r + '">' + (labels[r] || '.') + '</div>').join('');
+}
+
 // Pre-tournament form (last 5 matches, most recent last)
 const HARDCODED_FORM = {"Mexico": ["w", "w", "w", "d", "w"], "South Africa": ["l", "l", "d", "l", "w"], "South Korea": ["w", "d", "w", "l", "w"], "Czechia": ["w", "d", "w", "w", "l"], "Canada": ["w", "w", "d", "w", "l"], "Bosnia and Herzegovina": ["w", "l", "w", "d", "w"], "Qatar": ["l", "d", "l", "w", "d"], "Switzerland": ["w", "w", "d", "w", "w"], "Brazil": ["l", "l", "w", "w", "w"], "Morocco": ["w", "d", "w", "w", "d"], "Haiti": ["l", "d", "l", "l", "w"], "Scotland": ["w", "l", "d", "w", "l"], "USA": ["w", "d", "w", "l", "w"], "Paraguay": ["l", "w", "d", "l", "w"], "Australia": ["w", "d", "l", "w", "l"], "Turkey": ["w", "w", "l", "w", "d"], "Germany": ["w", "w", "w", "d", "w"], "Ecuador": ["w", "d", "w", "w", "l"], "Ivory Coast": ["w", "l", "w", "d", "w"], "Curacao": ["d", "l", "w", "l", "d"], "Netherlands": ["w", "w", "d", "w", "l"], "Japan": ["w", "w", "l", "w", "w"], "Tunisia": ["d", "w", "l", "w", "d"], "Ukraine": ["w", "d", "w", "l", "w"], "Belgium": ["w", "w", "d", "w", "l"], "Iran": ["w", "d", "w", "w", "l"], "Egypt": ["w", "d", "l", "w", "l"], "New Zealand": ["l", "d", "w", "l", "d"], "Spain": ["w", "w", "w", "w", "d"], "Saudi Arabia": ["w", "l", "d", "w", "l"], "Uruguay": ["w", "d", "w", "l", "w"], "Cape Verde": ["w", "w", "l", "d", "w"], "France": ["w", "l", "w", "w", "w"], "Senegal": ["w", "w", "d", "l", "w"], "Norway": ["w", "w", "d", "w", "l"], "Iraq": ["d", "l", "w", "d", "l"], "Argentina": ["w", "w", "w", "w", "w"], "Austria": ["w", "d", "w", "l", "w"], "Algeria": ["w", "w", "d", "l", "w"], "Jordan": ["d", "d", "l", "l", "d"], "Portugal": ["w", "w", "w", "d", "w"], "Croatia": ["w", "w", "d", "w", "l"], "Colombia": ["w", "d", "w", "w", "l"], "Uzbekistan": ["w", "l", "w", "d", "w"], "England": ["w", "w", "d", "w", "l"], "Ghana": ["l", "w", "d", "w", "l"], "Panama": ["w", "l", "d", "w", "l"]};
 async function fetchTeamForm(teamName) {
