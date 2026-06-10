@@ -243,7 +243,6 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
           <div class="sb-player">
             <div class="sb-avatar" id="sb-av1" style="background:var(--accent);color:#0a0a0a;cursor:pointer;" onclick="openAvatarUpdate()" title="Сменить фото"></div>
             <div class="sb-name" id="sb-nm1">—</div>
-            <div style="font-size:7px;color:var(--text3);margin-top:-2px;">✏️ фото</div>
           </div>
           <div class="sb-scores">
             <div class="sb-score" id="sb-sc1">0</div>
@@ -458,13 +457,13 @@ const FLAG_CODE = {
 };
 
 function flagImg(teamName, size) {
-  const w = size || 54; const h = size ? size*0.67 : 38;
+  const w = size || 54; const h = size ? Math.round(size*0.67) : 38;
   const code = FLAG_CODE[teamName];
   if (!code) return '<div style="font-size:22px;display:flex;align-items:center;justify-content:center;width:'+w+'px;height:'+h+'px;">🏳</div>';
-  return '<img src="https://flagcdn.com/'+w+'x'+h+'/'+code+'.png" ' +
-    'srcset="https://flagcdn.com/'+(w*2)+'x'+(h*2)+'/'+code+'.png 2x" ' +
+  // Use SVG for crisp quality at any size
+  return '<img src="https://flagcdn.com/'+code+'.svg" ' +
     'style="width:'+w+'px;height:'+h+'px;object-fit:cover;display:block;" ' +
-    'onerror="this.style.opacity=0" alt="'+teamName+'">';
+    'alt="'+teamName+'">';
 }
 
 
@@ -722,12 +721,16 @@ async function initApp() {
   renderWinnerSection();
   renderMatches();
 
-  // Синхронизация каждые 30 сек
+  // Синхронизация результатов при старте
+  syncMatchResults();
+  // Обновляем предикты и очки каждые 30 сек
   setInterval(async () => {
     await Promise.all([loadAllPreds(), loadAllPoints(), loadPlayers()]);
     renderScoreboard();
     renderMatches();
   }, 30000);
+  // Синхронизируем результаты каждые 5 минут
+  setInterval(syncMatchResults, 5 * 60 * 1000);
 }
 
 // =============================================
@@ -826,30 +829,68 @@ async function fetchMatchesFromAPI() {
 }
 
 // Обновляем результаты завершённых матчей и считаем очки
+// API-Football team name -> our match team name mapping
+const APIF_TEAM_MAP = {
+  'Mexico':'Mexico','South Africa':'South Africa','Korea Republic':'South Korea',
+  'Czech Republic':'Czechia','Canada':'Canada','Bosnia':'Bosnia and Herzegovina',
+  'Qatar':'Qatar','Switzerland':'Switzerland','Brazil':'Brazil','Morocco':'Morocco',
+  'Haiti':'Haiti','Scotland':'Scotland','USA':'USA','United States':'USA',
+  'Paraguay':'Paraguay','Australia':'Australia','Turkey':'Turkey','Turkiye':'Turkey',
+  'Germany':'Germany','Ecuador':'Ecuador','Ivory Coast':'Ivory Coast',
+  'Curacao':'Curacao','Netherlands':'Netherlands','Japan':'Japan',
+  'Tunisia':'Tunisia','Ukraine':'Ukraine','Spain':'Spain','Cape Verde':'Cape Verde',
+  'Saudi Arabia':'Saudi Arabia','Uruguay':'Uruguay','Belgium':'Belgium',
+  'Iran':'Iran','Egypt':'Egypt','New Zealand':'New Zealand','France':'France',
+  'Senegal':'Senegal','Norway':'Norway','Iraq':'Iraq','Argentina':'Argentina',
+  'Austria':'Austria','Algeria':'Algeria','Jordan':'Jordan','Portugal':'Portugal',
+  'Croatia':'Croatia','England':'England','Ghana':'Ghana','Panama':'Panama',
+};
+
 async function syncMatchResults() {
-  if (FOOTBALL_API_KEY === 'NO_KEY') return;
   try {
-    const res = await fetch('https://api.football-data.org/v4/competitions/WC/matches?status=FINISHED&season=2026', {
-      headers: { 'X-Auth-Token': FOOTBALL_API_KEY }
-    });
+    // FIFA World Cup 2026 league id in API-Football = 1 (FIFA World Cup)
+    const res = await fetch(
+      'https://api-football-v1.p.rapidapi.com/v3/fixtures?league=1&season=2026&status=FT',
+      { headers: {
+        'X-RapidAPI-Key': '62697869ebmshcc612dc6accc1cep1e67c7jsnca50ce653548',
+        'X-RapidAPI-Host': 'api-football-v1.p.rapidapi.com'
+      }}
+    );
     const data = await res.json();
-    if (!data.matches) return;
+    if (!data.response || !data.response.length) return;
 
-    for (const m of data.matches) {
-      const { data: existing } = await sb.from('matches').select('status,home_score,away_score').eq('id', String(m.id)).single();
-      if (!existing || existing.status === 'FINISHED') continue; // уже обработан
+    // Load our unfinished matches
+    const { data: pending } = await sb.from('matches')
+      .select('*').neq('status','FINISHED');
+    if (!pending || !pending.length) return;
 
-      const homeScore = m.score.fullTime.home;
-      const awayScore = m.score.fullTime.away;
+    for (const fix of data.response) {
+      const apiHome = APIF_TEAM_MAP[fix.teams.home.name] || fix.teams.home.name;
+      const apiAway = APIF_TEAM_MAP[fix.teams.away.name] || fix.teams.away.name;
+      const homeScore = fix.goals.home;
+      const awayScore = fix.goals.away;
+      if (homeScore === null || awayScore === null) continue;
+
+      // Find matching match in our DB
+      const match = pending.find(m =>
+        m.home_team === apiHome && m.away_team === apiAway
+      );
+      if (!match) continue;
 
       await sb.from('matches').update({
         status: 'FINISHED',
         home_score: homeScore,
         away_score: awayScore
-      }).eq('id', String(m.id));
+      }).eq('id', match.id);
 
-      await calculatePoints(String(m.id), homeScore, awayScore);
+      await calculatePoints(match.id, homeScore, awayScore);
+      console.log('Synced:', apiHome, homeScore, '-', awayScore, apiAway);
     }
+    // Reload matches after sync
+    await loadMatches();
+    await loadAllPoints();
+    renderScoreboard();
+    renderMatches();
   } catch(e) {
     console.error('Sync error:', e);
   }
@@ -1273,7 +1314,7 @@ async function loadTable() {
       const s = stats[t.name] || {played:0,w:0,d:0,l:0,pts:0};
       const code = FLAG_CODE[t.name];
       const flagHtml = code
-        ? '<img src="https://flagcdn.com/20x15/'+code+'.png" style="width:20px;height:15px;object-fit:cover;border-radius:2px;flex-shrink:0;">'
+        ? '<img src="https://flagcdn.com/'+code+'.svg" style="width:24px;height:16px;object-fit:cover;border-radius:2px;flex-shrink:0;">'
         : '<span style="font-size:14px;">🏳</span>';
       html += '<div class="gt-row">' +
         '<div class="gt-pos ' + (i < 2 ? 'q' : '') + '">' + (i+1) + '</div>' +
