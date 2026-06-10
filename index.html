@@ -131,7 +131,7 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 .cancel-btn { width: 100%; background: none; border: none; color: var(--text3); font-size: 11px; padding: 12px; cursor: pointer; font-family: 'Unbounded', sans-serif; margin-top: 2px; }
 
 /* ONBOARD */
-.onb-wrap { flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 28px 20px; }
+.onb-wrap { flex: 1; display: flex; flex-direction: column; justify-content: flex-start; padding: 28px 20px; overflow-y: auto; }
 .onb-logo { text-align: center; margin-bottom: 20px; }
 .onb-logo img { width: 160px; height: auto; }
 .onb-title { font-size: 18px; font-weight: 900; color: var(--text); text-align: center; margin-bottom: 4px; letter-spacing: -0.5px; }
@@ -372,14 +372,51 @@ let myAvatarBase64 = null;
 let avatarFile = null;
 
 const WINNER_TEAMS = [
-  { name: 'Аргентина', flag: '🇦🇷' },
-  { name: 'Франция', flag: '🇫🇷' },
+  { name: 'Мексика', flag: '🇲🇽' },
+  { name: 'Южная Корея', flag: '🇰🇷' },
+  { name: 'ЮАР', flag: '🇿🇦' },
+  { name: 'Чехия', flag: '🇨🇿' },
+  { name: 'Канада', flag: '🇨🇦' },
+  { name: 'Босния', flag: '🇧🇦' },
+  { name: 'Катар', flag: '🇶🇦' },
+  { name: 'Швейцария', flag: '🇨🇭' },
   { name: 'Бразилия', flag: '🇧🇷' },
-  { name: 'Германия', flag: '🇩🇪' },
-  { name: 'Испания', flag: '🇪🇸' },
-  { name: 'Англия', flag: '🇬🇧' },
-  { name: 'Португалия', flag: '🇵🇹' },
   { name: 'Марокко', flag: '🇲🇦' },
+  { name: 'Гаити', flag: '🇭🇹' },
+  { name: 'Шотландия', flag: '🏴' },
+  { name: 'США', flag: '🇺🇸' },
+  { name: 'Парагвай', flag: '🇵🇾' },
+  { name: 'Австралия', flag: '🇦🇺' },
+  { name: 'Турция', flag: '🇹🇷' },
+  { name: 'Германия', flag: '🇩🇪' },
+  { name: 'Эквадор', flag: '🇪🇨' },
+  { name: 'Кот-д-Ивуар', flag: '🇨🇮' },
+  { name: 'Кюрасао', flag: '🇨🇼' },
+  { name: 'Нидерланды', flag: '🇳🇱' },
+  { name: 'Япония', flag: '🇯🇵' },
+  { name: 'Тунис', flag: '🇹🇳' },
+  { name: 'Украина', flag: '🇺🇦' },
+  { name: 'Испания', flag: '🇪🇸' },
+  { name: 'Саудовская Аравия', flag: '🇸🇦' },
+  { name: 'Уругвай', flag: '🇺🇾' },
+  { name: 'Кабо-Верде', flag: '🇨🇻' },
+  { name: 'Бельгия', flag: '🇧🇪' },
+  { name: 'Иран', flag: '🇮🇷' },
+  { name: 'Египет', flag: '🇪🇬' },
+  { name: 'Новая Зеландия', flag: '🇳🇿' },
+  { name: 'Франция', flag: '🇫🇷' },
+  { name: 'Сенегал', flag: '🇸🇳' },
+  { name: 'Норвегия', flag: '🇳🇴' },
+  { name: 'Ирак', flag: '🇮🇶' },
+  { name: 'Аргентина', flag: '🇦🇷' },
+  { name: 'Австрия', flag: '🇦🇹' },
+  { name: 'Алжир', flag: '🇩🇿' },
+  { name: 'Иордания', flag: '🇯🇴' },
+  { name: 'Португалия', flag: '🇵🇹' },
+  { name: 'Хорватия', flag: '🇭🇷' },
+  { name: 'Англия', flag: '🇬🇧' },
+  { name: 'Гана', flag: '🇬🇭' },
+  { name: 'Панама', flag: '🇵🇦' },
 ];
 
 // =============================================
@@ -457,10 +494,10 @@ function handleAvatarFile(input) {
       cropScale = 180 / Math.min(img.naturalWidth, img.naturalHeight);
       cropX = 0; cropY = 0;
       applyCropTransform();
-      document.getElementById('crop-wrap').style.display = 'block';
       document.getElementById('onb-avatar-circle').style.display = 'none';
       document.querySelector('.onb-hint').style.display = 'none';
-      initCropDrag();
+      document.getElementById('crop-wrap').style.display = 'block';
+      setTimeout(initCropDrag, 50);
     };
   };
   reader.readAsDataURL(avatarFile);
@@ -858,7 +895,13 @@ function renderAvatar(elId, player) {
   el.style.height = '52px';
   if (player && player.avatar_url) {
     el.style.background = 'transparent';
-    el.innerHTML = '<img src="' + player.avatar_url + '" style="width:52px;height:52px;object-fit:cover;border-radius:50%;" onerror="this.parentElement.textContent='' + player.nickname.charAt(0).toUpperCase() + ''">';
+    const letter = player.nickname.charAt(0).toUpperCase();
+    const img = document.createElement('img');
+    img.src = player.avatar_url;
+    img.style.cssText = 'width:52px;height:52px;object-fit:cover;border-radius:50%;';
+    img.onerror = function(){ el.innerHTML = ''; el.textContent = letter; el.style.background = 'var(--accent)'; el.style.color = '#000'; };
+    el.innerHTML = '';
+    el.appendChild(img);
   } else if (player) {
     el.innerHTML = '';
     el.textContent = player.nickname.charAt(0).toUpperCase();
