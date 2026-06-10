@@ -241,7 +241,7 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
         <div class="sb-label">СЧЁТ ТУРНИРА</div>
         <div class="sb-row">
           <div class="sb-player">
-            <div class="sb-avatar" id="sb-av1" style="background:var(--accent);color:#0a0a0a;cursor:pointer;" onclick="openAvatarUpdate()" title="Сменить фото"></div>
+            <div class="sb-avatar" id="sb-av1" style="background:var(--accent);color:#0a0a0a;"></div>
             <div class="sb-name" id="sb-nm1">—</div>
           </div>
           <div class="sb-scores">
@@ -723,12 +723,12 @@ async function initApp() {
 
   // Синхронизация результатов при старте
   syncMatchResults();
-  // Обновляем предикты и очки каждые 30 сек
+  // Обновляем предикты и очки каждые 5 сек
   setInterval(async () => {
     await Promise.all([loadAllPreds(), loadAllPoints(), loadPlayers()]);
     renderScoreboard();
     renderMatches();
-  }, 30000);
+  }, 5000);
   // Синхронизируем результаты каждые 5 минут
   setInterval(syncMatchResults, 5 * 60 * 1000);
 }
@@ -845,6 +845,53 @@ const APIF_TEAM_MAP = {
   'Austria':'Austria','Algeria':'Algeria','Jordan':'Jordan','Portugal':'Portugal',
   'Croatia':'Croatia','England':'England','Ghana':'Ghana','Panama':'Panama',
 };
+
+// API-Football team IDs for WC 2026 teams
+const APIF_TEAM_IDS = {
+  'Mexico':16,'South Africa':48,'South Korea':149,'Czechia':63,
+  'Canada':95,'Bosnia and Herzegovina':16384,'Qatar':164,'Switzerland':15,
+  'Brazil':6,'Morocco':31,'Haiti':503,'Scotland':1178,
+  'USA':2,'Paraguay':27,'Australia':26,'Turkey':569,
+  'Germany':25,'Ecuador':127,'Ivory Coast':38,'Curacao':16388,
+  'Netherlands':1118,'Japan':29,'Tunisia':202,'Ukraine':772,
+  'Spain':9,'Cape Verde':16389,'Saudi Arabia':36,'Uruguay':28,
+  'Belgium':1,'Iran':163,'Egypt':23,'New Zealand':1230,
+  'France':2,'Senegal':16390,'Norway':104,'Iraq':155,
+  'Argentina':26,'Austria':775,'Algeria':16391,'Jordan':16392,
+  'Portugal':27,'Croatia':799,'England':10,'Ghana':16393,'Panama':16394,
+};
+
+async function fetchTeamForm(teamName) {
+  const id = APIF_TEAM_IDS[teamName];
+  if (!id) return null;
+  try {
+    const res = await fetch(
+      'https://api-football-v1.p.rapidapi.com/v3/fixtures?team='+id+'&last=5',
+      { headers: {
+        'X-RapidAPI-Key': '62697869ebmshcc612dc6accc1cep1e67c7jsnca50ce653548',
+        'X-RapidAPI-Host': 'api-football-v1.p.rapidapi.com'
+      }}
+    );
+    const data = await res.json();
+    if (!data.response) return null;
+    return data.response.map(f => {
+      const isHome = f.teams.home.id === id;
+      const gs = isHome ? f.goals.home : f.goals.away;
+      const gc = isHome ? f.goals.away : f.goals.home;
+      if (gs > gc) return 'w';
+      if (gs < gc) return 'l';
+      return 'd';
+    });
+  } catch(e) { return null; }
+}
+
+function renderForm5(results) {
+  if (!results || !results.length) return '';
+  const labels = { w:'В', d:'Н', l:'П' };
+  return results.map(r =>
+    '<div class="l5 ' + r + '">' + labels[r] + '</div>'
+  ).join('');
+}
 
 async function syncMatchResults() {
   try {
@@ -983,15 +1030,27 @@ function renderScoreboard() {
   const p1 = allPlayers[0];
   const p2 = allPlayers[1];
 
-  // Обновляем аватарки
+  // Обновляем аватарки — клик смены фото только на своей
+  const av1 = document.getElementById('sb-av1');
+  const av2 = document.getElementById('sb-av2');
   renderAvatar('sb-av1', p1);
   document.getElementById('sb-nm1').textContent = p1.nickname;
   document.getElementById('sb-sc1').textContent = totals[p1.id] || 0;
+  if (myPlayer && p1.id === myPlayer.id) {
+    av1.style.cursor = 'pointer'; av1.onclick = openAvatarUpdate;
+  } else {
+    av1.style.cursor = 'default'; av1.onclick = null;
+  }
 
   if (p2) {
     renderAvatar('sb-av2', p2);
     document.getElementById('sb-nm2').textContent = p2.nickname;
     document.getElementById('sb-sc2').textContent = totals[p2.id] || 0;
+    if (myPlayer && p2.id === myPlayer.id) {
+      av2.style.cursor = 'pointer'; av2.onclick = openAvatarUpdate;
+    } else {
+      av2.style.cursor = 'default'; av2.onclick = null;
+    }
 
     const diff = (totals[p1.id] || 0) - (totals[p2.id] || 0);
     const isMe = myPlayer && myPlayer.id === p1.id;
@@ -1217,11 +1276,18 @@ async function openPredict(matchId) {
   document.getElementById('pm-s1').value = '';
   document.getElementById('pm-s2').value = '';
 
-  // Форма последних 5 матчей (заглушка, можно расширить)
-  document.getElementById('pm-form1').innerHTML = '';
-  document.getElementById('pm-form2').innerHTML = '';
-
+  // Форма последних 5 матчей
+  document.getElementById('pm-form1').innerHTML = '<div class="form5-label">' + m.home_team + ' · последние 5</div><div class="last5"><div class="l5 d">·</div><div class="l5 d">·</div><div class="l5 d">·</div><div class="l5 d">·</div><div class="l5 d">·</div></div>';
+  document.getElementById('pm-form2').innerHTML = '<div class="form5-label">' + m.away_team + ' · последние 5</div><div class="last5"><div class="l5 d">·</div><div class="l5 d">·</div><div class="l5 d">·</div><div class="l5 d">·</div><div class="l5 d">·</div></div>';
   openModal('m-predict');
+
+  // Load form async after modal opens
+  Promise.all([fetchTeamForm(m.home_team), fetchTeamForm(m.away_team)]).then(([f1, f2]) => {
+    if (f1) document.getElementById('pm-form1').innerHTML =
+      '<div class="form5-label">' + m.home_team + ' · последние 5</div><div class="last5">' + renderForm5(f1) + '</div>';
+    if (f2) document.getElementById('pm-form2').innerHTML =
+      '<div class="form5-label">' + m.away_team + ' · последние 5</div><div class="last5">' + renderForm5(f2) + '</div>';
+  });
 }
 
 async function submitPredict() {
