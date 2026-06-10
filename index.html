@@ -49,7 +49,7 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 .sb-label { font-size: 8px; color: var(--text3); text-transform: uppercase; letter-spacing: 1px; text-align: center; margin-bottom: 12px; }
 .sb-row { display: flex; align-items: center; justify-content: center; }
 .sb-player { display: flex; flex-direction: column; align-items: center; gap: 6px; flex: 1; }
-.sb-avatar { width: 46px; height: 46px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 700; flex-shrink: 0; overflow: hidden; }
+.sb-avatar { width: 54px; height: 54px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 700; flex-shrink: 0; overflow: hidden; }
 .sb-avatar img { width: 100%; height: 100%; object-fit: cover; }
 .sb-name { font-size: 8px; color: var(--text2); }
 .sb-scores { display: flex; align-items: center; padding: 0 12px; gap: 6px; }
@@ -80,6 +80,8 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 .mc-teams { padding: 10px 14px 8px; display: flex; align-items: center; justify-content: space-between; }
 .mc-team { display: flex; flex-direction: column; align-items: center; gap: 7px; flex: 1; }
 .mc-flag-box { width: 54px; height: 38px; border-radius: 9px; overflow: hidden; display: flex; align-items: center; justify-content: center; font-size: 26px; background: var(--bg3); border: 1px solid var(--border); }
+.mc-flag-box img { width: 100%; height: 100%; object-fit: cover; }
+.modal-flag-box img { width: 100%; height: 100%; object-fit: cover; }
 .mc-tname { font-size: 9px; font-weight: 600; color: var(--text); text-align: center; }
 .mc-center { display: flex; flex-direction: column; align-items: center; padding: 0 6px; flex-shrink: 0; }
 .mc-vs { font-size: 13px; font-weight: 700; color: var(--text3); }
@@ -219,16 +221,6 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
         </div>
         <div class="onb-title">ПРЕДИКТЫ</div>
         <div class="onb-sub">ЧМ 2026 · США · КАНАДА · МЕКСИКА</div>
-        <div id="crop-wrap" style="display:none;margin-bottom:12px;">
-          <div style="position:relative;width:180px;height:180px;margin:0 auto 10px;overflow:hidden;border-radius:50%;border:2px solid var(--accent);cursor:move;touch-action:none;" id="crop-circle">
-            <img id="crop-img" style="position:absolute;max-width:none;user-select:none;" draggable="false">
-          </div>
-          <div style="display:flex;gap:8px;justify-content:center;margin-bottom:8px;">
-            <button onclick="cropZoom(-0.1)" style="background:var(--bg3);border:none;color:var(--text);border-radius:8px;padding:6px 16px;font-family:inherit;cursor:pointer;font-size:18px;">−</button>
-            <button onclick="cropZoom(0.1)" style="background:var(--bg3);border:none;color:var(--text);border-radius:8px;padding:6px 16px;font-family:inherit;cursor:pointer;font-size:18px;">+</button>
-          </div>
-          <button onclick="applyCrop()" style="width:100%;background:var(--accent);color:#000;border:none;border-radius:10px;padding:10px;font-family:inherit;font-weight:700;font-size:12px;cursor:pointer;margin-bottom:8px;">Применить ✓</button>
-        </div>
         <div class="onb-avatar" id="onb-avatar-circle" onclick="document.getElementById('avatar-file').click()">
           <span id="onb-avatar-emoji">📷</span>
         </div>
@@ -249,8 +241,9 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
         <div class="sb-label">СЧЁТ ТУРНИРА</div>
         <div class="sb-row">
           <div class="sb-player">
-            <div class="sb-avatar" id="sb-av1" style="background:var(--accent);color:#0a0a0a;"></div>
+            <div class="sb-avatar" id="sb-av1" style="background:var(--accent);color:#0a0a0a;cursor:pointer;" onclick="openAvatarUpdate()" title="Сменить фото"></div>
             <div class="sb-name" id="sb-nm1">—</div>
+            <div style="font-size:7px;color:var(--text3);margin-top:-2px;">✏️ фото</div>
           </div>
           <div class="sb-scores">
             <div class="sb-score" id="sb-sc1">0</div>
@@ -342,7 +335,36 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
     </div>
   </div>
 
-  <div class="toast" id="toast"></div>
+  <input type="file" id="avatar-update-file" accept="image/*" style="display:none" onchange="handleAvatarUpdate(this)">
+<div class="toast" id="toast"></div>
+
+<!-- FULLSCREEN CROP OVERLAY -->
+<div id="crop-overlay" style="display:none;position:fixed;inset:0;background:#000;z-index:999;flex-direction:column;align-items:center;justify-content:space-between;padding:0;">
+  <div style="width:100%;padding:16px 20px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
+    <button onclick="cancelCrop()" style="background:rgba(255,255,255,0.1);border:none;color:#fff;border-radius:20px;padding:8px 16px;font-family:inherit;font-size:12px;cursor:pointer;">Отмена</button>
+    <div style="font-size:12px;font-weight:700;color:#fff;font-family:inherit;">Кадрировать фото</div>
+    <button onclick="applyCrop()" style="background:var(--accent);border:none;color:#000;border-radius:20px;padding:8px 16px;font-family:inherit;font-size:12px;font-weight:700;cursor:pointer;">Готово</button>
+  </div>
+  <div style="flex:1;display:flex;align-items:center;justify-content:center;width:100%;position:relative;overflow:hidden;">
+    <div id="crop-bg" style="position:absolute;inset:0;overflow:hidden;">
+      <img id="crop-img-bg" style="position:absolute;max-width:none;opacity:0.3;filter:blur(8px);" draggable="false">
+    </div>
+    <div style="position:relative;z-index:2;">
+      <div id="crop-circle" style="position:relative;width:280px;height:280px;overflow:hidden;border-radius:50%;border:3px solid var(--accent);cursor:move;touch-action:none;box-shadow:0 0 0 9999px rgba(0,0,0,0.6);">
+        <img id="crop-img" style="position:absolute;max-width:none;user-select:none;" draggable="false">
+      </div>
+    </div>
+  </div>
+  <div style="width:100%;padding:20px;flex-shrink:0;">
+    <div style="display:flex;align-items:center;gap:12px;">
+      <span style="font-size:16px;">🔍</span>
+      <input type="range" id="crop-slider" min="50" max="300" value="100"
+        oninput="cropZoomSlider(this.value)"
+        style="flex:1;accent-color:var(--accent);height:3px;">
+      <span style="font-size:20px;">🔍</span>
+    </div>
+  </div>
+</div>
 </div>
 
 <script>
@@ -419,6 +441,33 @@ const WINNER_TEAMS = [
   { name: 'Панама', flag: '🇵🇦' },
 ];
 
+// Flag codes for flagcdn.com (ISO 3166-1 alpha-2)
+const FLAG_CODE = {
+  'Mexico':'mx','South Africa':'za','South Korea':'kr','Czechia':'cz',
+  'Canada':'ca','Bosnia and Herzegovina':'ba','Qatar':'qa','Switzerland':'ch',
+  'Brazil':'br','Morocco':'ma','Haiti':'ht','Scotland':'gb-sct',
+  'USA':'us','Paraguay':'py','Australia':'au','Turkey':'tr',
+  'Germany':'de','Ecuador':'ec','Ivory Coast':'ci','Curacao':'cw',
+  'Netherlands':'nl','Japan':'jp','Tunisia':'tn','Ukraine':'ua',
+  'Spain':'es','Cape Verde':'cv','Saudi Arabia':'sa','Uruguay':'uy',
+  'Belgium':'be','Iran':'ir','Egypt':'eg','New Zealand':'nz',
+  'France':'fr','Senegal':'sn','Norway':'no','Iraq':'iq',
+  'Argentina':'ar','Austria':'at','Algeria':'dz','Jordan':'jo',
+  'Portugal':'pt','Croatia':'hr','England':'gb-eng',
+  'Ghana':'gh','Panama':'pa',
+};
+
+function flagImg(teamName, size) {
+  const w = size || 54; const h = size ? size*0.67 : 38;
+  const code = FLAG_CODE[teamName];
+  if (!code) return '<div style="font-size:22px;display:flex;align-items:center;justify-content:center;width:'+w+'px;height:'+h+'px;">🏳</div>';
+  return '<img src="https://flagcdn.com/'+w+'x'+h+'/'+code+'.png" ' +
+    'srcset="https://flagcdn.com/'+(w*2)+'x'+(h*2)+'/'+code+'.png 2x" ' +
+    'style="width:'+w+'px;height:'+h+'px;object-fit:cover;display:block;" ' +
+    'onerror="this.style.opacity=0" alt="'+teamName+'">';
+}
+
+
 // =============================================
 // УТИЛИТЫ
 // =============================================
@@ -482,22 +531,30 @@ function ptsLabel(pts, reason) {
 // =============================================
 // CROP STATE
 let cropScale = 1, cropX = 0, cropY = 0, cropDragging = false, cropStartX, cropStartY, cropOrigX, cropOrigY;
+const CROP_SIZE = 280; // circle diameter in overlay
 
 function handleAvatarFile(input) {
   if (!input.files[0]) return;
   avatarFile = input.files[0];
   const reader = new FileReader();
   reader.onload = e => {
+    const src = e.target.result;
     const img = document.getElementById('crop-img');
-    img.src = e.target.result;
+    const imgBg = document.getElementById('crop-img-bg');
+    img.src = src; imgBg.src = src;
     img.onload = () => {
-      cropScale = 180 / Math.min(img.naturalWidth, img.naturalHeight);
-      cropX = 0; cropY = 0;
+      // Scale so shorter side fills the circle
+      cropScale = CROP_SIZE / Math.min(img.naturalWidth, img.naturalHeight);
+      // Center image
+      cropX = (CROP_SIZE - img.naturalWidth * cropScale) / 2;
+      cropY = (CROP_SIZE - img.naturalHeight * cropScale) / 2;
+      // Sync bg image size
+      imgBg.style.width = '100%';
+      // Reset slider
+      document.getElementById('crop-slider').value = 100;
       applyCropTransform();
-      document.getElementById('onb-avatar-circle').style.display = 'none';
-      document.querySelector('.onb-hint').style.display = 'none';
-      document.getElementById('crop-wrap').style.display = 'block';
-      setTimeout(initCropDrag, 50);
+      document.getElementById('crop-overlay').style.display = 'flex';
+      setTimeout(initCropDrag, 30);
     };
   };
   reader.readAsDataURL(avatarFile);
@@ -505,23 +562,41 @@ function handleAvatarFile(input) {
 
 function applyCropTransform() {
   const img = document.getElementById('crop-img');
-  img.style.width = (img.naturalWidth * cropScale) + 'px';
-  img.style.height = (img.naturalHeight * cropScale) + 'px';
+  const w = img.naturalWidth * cropScale;
+  const h = img.naturalHeight * cropScale;
+  img.style.width = w + 'px';
+  img.style.height = h + 'px';
   img.style.left = cropX + 'px';
   img.style.top = cropY + 'px';
+  // Sync blurred background
+  const bg = document.getElementById('crop-img-bg');
+  bg.style.width = w + 'px';
+  bg.style.height = h + 'px';
+  bg.style.left = ((window.innerWidth - w) / 2) + 'px';
+  bg.style.top = ((window.innerHeight * 0.55 - h) / 2) + 'px';
 }
 
-function cropZoom(delta) {
-  cropScale = Math.max(0.3, Math.min(5, cropScale + delta));
+function cropZoomSlider(val) {
+  const base = CROP_SIZE / Math.min(
+    document.getElementById('crop-img').naturalWidth,
+    document.getElementById('crop-img').naturalHeight
+  );
+  cropScale = base * (val / 100);
   applyCropTransform();
+}
+
+function cancelCrop() {
+  document.getElementById('crop-overlay').style.display = 'none';
 }
 
 function initCropDrag() {
   const circle = document.getElementById('crop-circle');
   circle.onpointerdown = e => {
-    cropDragging = true; cropStartX = e.clientX; cropStartY = e.clientY;
+    cropDragging = true;
+    cropStartX = e.clientX; cropStartY = e.clientY;
     cropOrigX = cropX; cropOrigY = cropY;
     circle.setPointerCapture(e.pointerId);
+    e.preventDefault();
   };
   circle.onpointermove = e => {
     if (!cropDragging) return;
@@ -535,20 +610,24 @@ function initCropDrag() {
 function applyCrop() {
   const img = document.getElementById('crop-img');
   const canvas = document.createElement('canvas');
-  const size = 200;
+  const size = 400; // high-res output
   canvas.width = size; canvas.height = size;
   const ctx = canvas.getContext('2d');
   ctx.beginPath();
   ctx.arc(size/2, size/2, size/2, 0, Math.PI*2);
   ctx.clip();
-  ctx.drawImage(img, cropX, cropY, img.naturalWidth * cropScale, img.naturalHeight * cropScale);
-  myAvatarBase64 = canvas.toDataURL('image/jpeg', 0.85);
-  // Show preview on avatar circle
-  document.getElementById('crop-wrap').style.display = 'none';
+  // Scale cropX/cropY from CROP_SIZE to canvas size
+  const ratio = size / CROP_SIZE;
+  ctx.drawImage(img,
+    cropX * ratio, cropY * ratio,
+    img.naturalWidth * cropScale * ratio,
+    img.naturalHeight * cropScale * ratio
+  );
+  myAvatarBase64 = canvas.toDataURL('image/jpeg', 0.88);
+  document.getElementById('crop-overlay').style.display = 'none';
+  // Show preview
   const circle = document.getElementById('onb-avatar-circle');
-  circle.style.display = 'flex';
   circle.innerHTML = '<img src="' + myAvatarBase64 + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
-  document.querySelector('.onb-hint').style.display = 'block';
   document.querySelector('.onb-hint').textContent = 'Нажми чтобы изменить';
 }
 
@@ -1059,9 +1138,9 @@ function renderMatchCard(m) {
   return '<div class="match-card"' + (clickable ? ' onclick="openPredict(\'' + m.id + '\')"' : '') + '>' +
     '<div class="mc-meta"><div class="mc-badge">' + stageLabel + '</div><div class="mc-time">' + time + '</div></div>' +
     '<div class="mc-teams">' +
-      '<div class="mc-team"><div class="mc-flag-box">' + (m.home_flag || '🏳') + '</div><div class="mc-tname">' + m.home_team + '</div></div>' +
+      '<div class="mc-team"><div class="mc-flag-box">' + flagImg(m.home_team) + '</div><div class="mc-tname">' + m.home_team + '</div></div>' +
       '<div class="mc-center"><div class="mc-vs">vs</div></div>' +
-      '<div class="mc-team"><div class="mc-flag-box">' + (m.away_flag || '🏳') + '</div><div class="mc-tname">' + m.away_team + '</div></div>' +
+      '<div class="mc-team"><div class="mc-flag-box">' + flagImg(m.away_team) + '</div><div class="mc-tname">' + m.away_team + '</div></div>' +
     '</div>' +
     bottomHtml +
   '</div>';
@@ -1090,8 +1169,8 @@ async function openPredict(matchId) {
 
   document.getElementById('pm-title').textContent = 'Прогноз';
   document.getElementById('pm-sub').textContent = m.home_team + ' — ' + m.away_team + ' · ' + formatDate(m.match_date) + ' · ' + formatTime(m.match_date);
-  document.getElementById('pm-flag1').textContent = m.home_flag || '🏳';
-  document.getElementById('pm-flag2').textContent = m.away_flag || '🏳';
+  document.getElementById('pm-flag1').innerHTML = flagImg(m.home_team, 64);
+  document.getElementById('pm-flag2').innerHTML = flagImg(m.away_team, 64);
   document.getElementById('pm-team1').textContent = m.home_team;
   document.getElementById('pm-team2').textContent = m.away_team;
   document.getElementById('pm-s1').value = '';
@@ -1140,52 +1219,78 @@ async function submitPredict() {
 // ТАБЛИЦА ТУРНИРА
 // =============================================
 async function loadTable() {
-  const content = document.getElementById('table-content');
+  const el = document.getElementById('table-content');
+  el.innerHTML = '<div class="loader"><div class="spin"></div><div class="loader-text">Считаем таблицу...</div></div>';
 
-  // Пробуем из API
-  if (FOOTBALL_API_KEY === 'NO_KEY') {
-    content.innerHTML = '<div class="empty">Добавь API-ключ<br>чтобы видеть таблицу</div>';
-    return;
-  }
+  // Build standings from our matches in Supabase
+  const { data: finishedMatches } = await sb.from('matches')
+    .select('*').eq('status','FINISHED').eq('stage','GROUP_STAGE');
 
-  content.innerHTML = '<div class="loader"><div class="spin"></div><div class="loader-text">Загружаем таблицу...</div></div>';
+  const { data: allGroupMatches } = await sb.from('matches')
+    .select('home_team,away_team,group_name').eq('stage','GROUP_STAGE');
 
-  try {
-    const res = await fetch('https://api.football-data.org/v4/competitions/WC/standings?season=2026', {
-      headers: { 'X-Auth-Token': FOOTBALL_API_KEY }
+  // Collect all teams per group
+  const groups = {};
+  (allGroupMatches || []).forEach(m => {
+    const g = m.group_name;
+    if (!groups[g]) groups[g] = new Set();
+    groups[g].add(m.home_team);
+    groups[g].add(m.away_team);
+  });
+
+  // Init stats
+  const stats = {}; // team -> {g,w,d,l,gf,ga,pts}
+  Object.values(groups).forEach(teams => {
+    teams.forEach(t => {
+      if (!stats[t]) stats[t] = {played:0,w:0,d:0,l:0,gf:0,ga:0,pts:0};
     });
-    const data = await res.json();
-    if (!data.standings) { content.innerHTML = '<div class="empty">Таблица недоступна</div>'; return; }
+  });
 
-    let html = '';
-    data.standings.forEach(group => {
-      if (group.type !== 'TOTAL') return;
-      html += '<div class="group-block">';
-      html += '<div class="group-label">' + (group.group || 'Плей-офф') + '</div>';
-      html += '<div class="group-table">';
-      html += '<div class="gt-head"><div class="gt-hcol">#</div><div class="gt-hcol left">Команда</div><div class="gt-hcol">И</div><div class="gt-hcol">В</div><div class="gt-hcol">Н</div><div class="gt-hcol">П</div><div class="gt-hcol">О</div></div>';
+  // Calculate from finished matches
+  (finishedMatches || []).forEach(m => {
+    const h = m.home_team, a = m.away_team;
+    const hs = m.home_score, as_ = m.away_score;
+    if (!stats[h]) stats[h] = {played:0,w:0,d:0,l:0,gf:0,ga:0,pts:0};
+    if (!stats[a]) stats[a] = {played:0,w:0,d:0,l:0,gf:0,ga:0,pts:0};
+    stats[h].played++; stats[a].played++;
+    stats[h].gf += hs; stats[h].ga += as_;
+    stats[a].gf += as_; stats[a].ga += hs;
+    if (hs > as_) { stats[h].w++; stats[h].pts+=3; stats[a].l++; }
+    else if (hs < as_) { stats[a].w++; stats[a].pts+=3; stats[h].l++; }
+    else { stats[h].d++; stats[h].pts++; stats[a].d++; stats[a].pts++; }
+  });
 
-      group.table.forEach((row, i) => {
-        const isQ = i < 2;
-        html += '<div class="gt-row">' +
-          '<div class="gt-pos ' + (isQ ? 'q' : '') + '">' + row.position + '</div>' +
-          '<div class="gt-team-cell"><span class="gt-flag">🏴</span><span class="gt-tname">' + row.team.name + '</span></div>' +
-          '<div class="gt-cell">' + row.playedGames + '</div>' +
-          '<div class="gt-cell">' + row.won + '</div>' +
-          '<div class="gt-cell">' + row.draw + '</div>' +
-          '<div class="gt-cell">' + row.lost + '</div>' +
-          '<div class="gt-pts">' + row.points + '</div>' +
-        '</div>';
-      });
-
-      html += '</div></div>';
+  const sortedGroups = Object.entries(groups).sort((a,b) => a[0].localeCompare(b[0]));
+  let html = '';
+  sortedGroups.forEach(([groupName, teamsSet]) => {
+    const teams = [...teamsSet].map(t => ({name:t, ...stats[t]}))
+      .sort((a,b) => b.pts-a.pts || (b.gf-b.ga)-(a.gf-a.ga) || b.gf-a.gf);
+    html += '<div class="group-block">';
+    html += '<div class="group-label">' + groupName + '</div>';
+    html += '<div class="group-table">';
+    html += '<div class="gt-head"><div class="gt-hcol">#</div><div class="gt-hcol left">Команда</div><div class="gt-hcol">И</div><div class="gt-hcol">В</div><div class="gt-hcol">Н</div><div class="gt-hcol">П</div><div class="gt-hcol">О</div></div>';
+    teams.forEach((t, i) => {
+      const s = stats[t.name] || {played:0,w:0,d:0,l:0,pts:0};
+      const code = FLAG_CODE[t.name];
+      const flagHtml = code
+        ? '<img src="https://flagcdn.com/20x15/'+code+'.png" style="width:20px;height:15px;object-fit:cover;border-radius:2px;flex-shrink:0;">'
+        : '<span style="font-size:14px;">🏳</span>';
+      html += '<div class="gt-row">' +
+        '<div class="gt-pos ' + (i < 2 ? 'q' : '') + '">' + (i+1) + '</div>' +
+        '<div class="gt-team-cell">' + flagHtml + '<span class="gt-tname">' + t.name + '</span></div>' +
+        '<div class="gt-cell">' + s.played + '</div>' +
+        '<div class="gt-cell">' + s.w + '</div>' +
+        '<div class="gt-cell">' + s.d + '</div>' +
+        '<div class="gt-cell">' + s.l + '</div>' +
+        '<div class="gt-pts">' + s.pts + '</div>' +
+      '</div>';
     });
+    html += '</div></div>';
+  });
 
-    html += '<div class="legend-row"><div class="legend-dot"></div><div class="legend-text">Топ-2 каждой группы + лучшие 3-и места выходят в плей-офф</div></div>';
-    content.innerHTML = html;
-  } catch(e) {
-    content.innerHTML = '<div class="empty">Ошибка загрузки</div>';
-  }
+  if (!html) html = '<div class="empty">Группа ещё не сыграла ни одного матча</div>';
+  html += '<div class="legend-row"><div class="legend-dot"></div><div class="legend-text">Топ-2 каждой группы + лучшие 3-и места выходят в плей-офф</div></div>';
+  el.innerHTML = html;
 }
 
 // =============================================
@@ -1266,6 +1371,81 @@ function renderHistCard(m) {
   html += '</div></div>';
   return html;
 }
+
+// =============================================
+// ОБНОВЛЕНИЕ АВАТАРКИ С ГЛАВНОГО ЭКРАНА
+// =============================================
+function openAvatarUpdate() {
+  document.getElementById('avatar-update-file').click();
+}
+
+function handleAvatarUpdate(input) {
+  if (!input.files[0]) return;
+  avatarFile = input.files[0];
+  const reader = new FileReader();
+  reader.onload = e => {
+    const src = e.target.result;
+    const img = document.getElementById('crop-img');
+    const imgBg = document.getElementById('crop-img-bg');
+    img.src = src; imgBg.src = src;
+    img.onload = () => {
+      cropScale = CROP_SIZE / Math.min(img.naturalWidth, img.naturalHeight);
+      cropX = (CROP_SIZE - img.naturalWidth * cropScale) / 2;
+      cropY = (CROP_SIZE - img.naturalHeight * cropScale) / 2;
+      document.getElementById('crop-slider').value = 100;
+      applyCropTransform();
+      // After crop — save to Supabase and update UI
+      document.getElementById('crop-overlay').dataset.mode = 'update';
+      document.getElementById('crop-overlay').style.display = 'flex';
+      setTimeout(initCropDrag, 30);
+    };
+  };
+  reader.readAsDataURL(avatarFile);
+  input.value = '';
+}
+
+// Override applyCrop to handle both onboard and update modes
+const _origApplyCrop = applyCrop;
+window.applyCrop = async function() {
+  const mode = document.getElementById('crop-overlay').dataset.mode;
+  // Run original crop logic to get myAvatarBase64
+  const img = document.getElementById('crop-img');
+  const canvas = document.createElement('canvas');
+  const size = 400;
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  ctx.beginPath();
+  ctx.arc(size/2, size/2, size/2, 0, Math.PI*2);
+  ctx.clip();
+  const ratio = size / CROP_SIZE;
+  ctx.drawImage(img, cropX*ratio, cropY*ratio,
+    img.naturalWidth*cropScale*ratio, img.naturalHeight*cropScale*ratio);
+  myAvatarBase64 = canvas.toDataURL('image/jpeg', 0.88);
+  document.getElementById('crop-overlay').style.display = 'none';
+
+  if (mode === 'update' && myPlayer) {
+    // Upload and save to player record
+    toast('Загружаем фото...');
+    const url = await uploadAvatarBase64(myPlayer.nickname, myAvatarBase64);
+    if (url) {
+      await sb.from('players').update({ avatar_url: url }).eq('id', myPlayer.id);
+      myPlayer.avatar_url = url;
+      // Update in allPlayers array
+      const idx = allPlayers.findIndex(p => p.id === myPlayer.id);
+      if (idx >= 0) allPlayers[idx].avatar_url = url;
+      renderAvatar('sb-av1', myPlayer);
+      toast('Фото обновлено ✓');
+    } else {
+      toast('Ошибка загрузки фото');
+    }
+    document.getElementById('crop-overlay').dataset.mode = '';
+  } else {
+    // Onboard mode — just show preview
+    const circle = document.getElementById('onb-avatar-circle');
+    circle.innerHTML = '<img src="' + myAvatarBase64 + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
+    document.querySelector('.onb-hint').textContent = 'Нажми чтобы изменить';
+  }
+};
 
 // =============================================
 // СТАРТ
