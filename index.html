@@ -861,36 +861,33 @@ const TEAM_ID_MAP = {
   'Netherlands':8601,'Norway':8872,'Scotland':8873,'Curacao':9460,
 };
 
-async function fetchTeamForm(teamName) {
-  const id = TEAM_ID_MAP[teamName];
-  if (!id) return null;
-  try {
-    const res = await fetch(
-      'https://wc2026-proxy.lisov199974.workers.dev/wc/teams/' + id + '/matches?status=FINISHED&limit=5'
-    );
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (!data.matches || !data.matches.length) return null;
 
-    return data.matches.slice(-5).map(m => {
-      const isHome = m.homeTeam.id === id;
-      const hs = m.score.fullTime.home;
-      const as_ = m.score.fullTime.away;
-      const gs = isHome ? hs : as_;
-      const gc = isHome ? as_ : hs;
+// Pre-tournament form (last 5 matches, most recent last)
+const HARDCODED_FORM = {"Mexico": ["w", "w", "w", "d", "w"], "South Africa": ["l", "l", "d", "l", "w"], "South Korea": ["w", "d", "w", "l", "w"], "Czechia": ["w", "d", "w", "w", "l"], "Canada": ["w", "w", "d", "w", "l"], "Bosnia and Herzegovina": ["w", "l", "w", "d", "w"], "Qatar": ["l", "d", "l", "w", "d"], "Switzerland": ["w", "w", "d", "w", "w"], "Brazil": ["l", "l", "w", "w", "w"], "Morocco": ["w", "d", "w", "w", "d"], "Haiti": ["l", "d", "l", "l", "w"], "Scotland": ["w", "l", "d", "w", "l"], "USA": ["w", "d", "w", "l", "w"], "Paraguay": ["l", "w", "d", "l", "w"], "Australia": ["w", "d", "l", "w", "l"], "Turkey": ["w", "w", "l", "w", "d"], "Germany": ["w", "w", "w", "d", "w"], "Ecuador": ["w", "d", "w", "w", "l"], "Ivory Coast": ["w", "l", "w", "d", "w"], "Curacao": ["d", "l", "w", "l", "d"], "Netherlands": ["w", "w", "d", "w", "l"], "Japan": ["w", "w", "l", "w", "w"], "Tunisia": ["d", "w", "l", "w", "d"], "Ukraine": ["w", "d", "w", "l", "w"], "Belgium": ["w", "w", "d", "w", "l"], "Iran": ["w", "d", "w", "w", "l"], "Egypt": ["w", "d", "l", "w", "l"], "New Zealand": ["l", "d", "w", "l", "d"], "Spain": ["w", "w", "w", "w", "d"], "Saudi Arabia": ["w", "l", "d", "w", "l"], "Uruguay": ["w", "d", "w", "l", "w"], "Cape Verde": ["w", "w", "l", "d", "w"], "France": ["w", "l", "w", "w", "w"], "Senegal": ["w", "w", "d", "l", "w"], "Norway": ["w", "w", "d", "w", "l"], "Iraq": ["d", "l", "w", "d", "l"], "Argentina": ["w", "w", "w", "w", "w"], "Austria": ["w", "d", "w", "l", "w"], "Algeria": ["w", "w", "d", "l", "w"], "Jordan": ["d", "d", "l", "l", "d"], "Portugal": ["w", "w", "w", "d", "w"], "Croatia": ["w", "w", "d", "w", "l"], "Colombia": ["w", "d", "w", "w", "l"], "Uzbekistan": ["w", "l", "w", "d", "w"], "England": ["w", "w", "d", "w", "l"], "Ghana": ["l", "w", "d", "w", "l"], "Panama": ["w", "l", "d", "w", "l"]};
+async function fetchTeamForm(teamName) {
+  try {
+    // Get WC matches from Supabase
+    const { data: teamGames } = await sb.from('matches')
+      .select('*')
+      .eq('status', 'FINISHED')
+      .or('home_team.eq.' + teamName + ',away_team.eq.' + teamName)
+      .order('match_date', { ascending: true });
+
+    const wcForm = (teamGames || []).map(g => {
+      const isHome = g.home_team === teamName;
+      const gs = isHome ? g.home_score : g.away_score;
+      const gc = isHome ? g.away_score : g.home_score;
       if (gs > gc) return 'w';
       if (gs < gc) return 'l';
       return 'd';
     });
-  } catch(e) { return null; }
-}function renderForm5(results) {
-  if (!results || !results.length) return '';
-  const labels = { w:'В', d:'Н', l:'П' };
-  return results.map(r =>
-    '<div class="l5 ' + r + '">' + labels[r] + '</div>'
-  ).join('');
-}
 
+    // Merge: start with hardcoded, append WC results, keep last 5
+    const pre = HARDCODED_FORM[teamName] || ['d','d','d','d','d'];
+    const combined = [...pre, ...wcForm].slice(-5);
+    return combined;
+  } catch(e) { return HARDCODED_FORM[teamName] || null; }
+}
 async function syncMatchResults() {
   try {
     const res = await fetch(
