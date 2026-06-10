@@ -219,6 +219,16 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
         </div>
         <div class="onb-title">ПРЕДИКТЫ</div>
         <div class="onb-sub">ЧМ 2026 · США · КАНАДА · МЕКСИКА</div>
+        <div id="crop-wrap" style="display:none;margin-bottom:12px;">
+          <div style="position:relative;width:180px;height:180px;margin:0 auto 10px;overflow:hidden;border-radius:50%;border:2px solid var(--accent);cursor:move;touch-action:none;" id="crop-circle">
+            <img id="crop-img" style="position:absolute;max-width:none;user-select:none;" draggable="false">
+          </div>
+          <div style="display:flex;gap:8px;justify-content:center;margin-bottom:8px;">
+            <button onclick="cropZoom(-0.1)" style="background:var(--bg3);border:none;color:var(--text);border-radius:8px;padding:6px 16px;font-family:inherit;cursor:pointer;font-size:18px;">−</button>
+            <button onclick="cropZoom(0.1)" style="background:var(--bg3);border:none;color:var(--text);border-radius:8px;padding:6px 16px;font-family:inherit;cursor:pointer;font-size:18px;">+</button>
+          </div>
+          <button onclick="applyCrop()" style="width:100%;background:var(--accent);color:#000;border:none;border-radius:10px;padding:10px;font-family:inherit;font-weight:700;font-size:12px;cursor:pointer;margin-bottom:8px;">Применить ✓</button>
+        </div>
         <div class="onb-avatar" id="onb-avatar-circle" onclick="document.getElementById('avatar-file').click()">
           <span id="onb-avatar-emoji">📷</span>
         </div>
@@ -433,26 +443,88 @@ function ptsLabel(pts, reason) {
 // =============================================
 // АВАТАРКА
 // =============================================
+// CROP STATE
+let cropScale = 1, cropX = 0, cropY = 0, cropDragging = false, cropStartX, cropStartY, cropOrigX, cropOrigY;
+
 function handleAvatarFile(input) {
   if (!input.files[0]) return;
   avatarFile = input.files[0];
   const reader = new FileReader();
   reader.onload = e => {
-    myAvatarBase64 = e.target.result;
-    const circle = document.getElementById('onb-avatar-circle');
-    circle.innerHTML = '<img src="' + myAvatarBase64 + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
+    const img = document.getElementById('crop-img');
+    img.src = e.target.result;
+    img.onload = () => {
+      cropScale = 180 / Math.min(img.naturalWidth, img.naturalHeight);
+      cropX = 0; cropY = 0;
+      applyCropTransform();
+      document.getElementById('crop-wrap').style.display = 'block';
+      document.getElementById('onb-avatar-circle').style.display = 'none';
+      document.querySelector('.onb-hint').style.display = 'none';
+      initCropDrag();
+    };
   };
   reader.readAsDataURL(avatarFile);
 }
 
-async function uploadAvatar(nickname) {
-  if (!avatarFile) return null;
-  const ext = avatarFile.name.split('.').pop();
-  const path = nickname + '_' + Date.now() + '.' + ext;
-  const { error } = await sb.storage.from('avatars').upload(path, avatarFile, { upsert: true });
-  if (error) { console.error('Avatar upload error:', error); return null; }
-  const { data } = sb.storage.from('avatars').getPublicUrl(path);
-  return data.publicUrl;
+function applyCropTransform() {
+  const img = document.getElementById('crop-img');
+  img.style.width = (img.naturalWidth * cropScale) + 'px';
+  img.style.height = (img.naturalHeight * cropScale) + 'px';
+  img.style.left = cropX + 'px';
+  img.style.top = cropY + 'px';
+}
+
+function cropZoom(delta) {
+  cropScale = Math.max(0.3, Math.min(5, cropScale + delta));
+  applyCropTransform();
+}
+
+function initCropDrag() {
+  const circle = document.getElementById('crop-circle');
+  circle.onpointerdown = e => {
+    cropDragging = true; cropStartX = e.clientX; cropStartY = e.clientY;
+    cropOrigX = cropX; cropOrigY = cropY;
+    circle.setPointerCapture(e.pointerId);
+  };
+  circle.onpointermove = e => {
+    if (!cropDragging) return;
+    cropX = cropOrigX + (e.clientX - cropStartX);
+    cropY = cropOrigY + (e.clientY - cropStartY);
+    applyCropTransform();
+  };
+  circle.onpointerup = () => { cropDragging = false; };
+}
+
+function applyCrop() {
+  const img = document.getElementById('crop-img');
+  const canvas = document.createElement('canvas');
+  const size = 200;
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  ctx.beginPath();
+  ctx.arc(size/2, size/2, size/2, 0, Math.PI*2);
+  ctx.clip();
+  ctx.drawImage(img, cropX, cropY, img.naturalWidth * cropScale, img.naturalHeight * cropScale);
+  myAvatarBase64 = canvas.toDataURL('image/jpeg', 0.85);
+  // Show preview on avatar circle
+  document.getElementById('crop-wrap').style.display = 'none';
+  const circle = document.getElementById('onb-avatar-circle');
+  circle.style.display = 'flex';
+  circle.innerHTML = '<img src="' + myAvatarBase64 + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
+  document.querySelector('.onb-hint').style.display = 'block';
+  document.querySelector('.onb-hint').textContent = 'Нажми чтобы изменить';
+}
+
+async function uploadAvatarBase64(nickname, base64) {
+  try {
+    const res = await fetch(base64);
+    const blob = await res.blob();
+    const path = nickname.replace(/[^a-zA-Z0-9]/g,'_') + '_' + Date.now() + '.jpg';
+    const { error } = await sb.storage.from('avatars').upload(path, blob, { contentType: 'image/jpeg', upsert: true });
+    if (error) { console.error('Avatar upload error:', error); return null; }
+    const { data } = sb.storage.from('avatars').getPublicUrl(path);
+    return data.publicUrl;
+  } catch(e) { console.error(e); return null; }
 }
 
 // =============================================
@@ -474,7 +546,11 @@ async function doOnboard() {
       myPlayer = existing;
     } else {
       // Загружаем аватарку если есть
-      const avatarUrl = await uploadAvatar(nick);
+      // Конвертируем base64 в blob и загружаем
+      let avatarUrl = null;
+      if (myAvatarBase64) {
+        avatarUrl = await uploadAvatarBase64(nick, myAvatarBase64);
+      }
       const { data: newPlayer, error } = await sb.from('players')
         .insert({ nickname: nick, avatar_url: avatarUrl })
         .select().single();
@@ -550,12 +626,7 @@ async function loadMatches() {
   const { data } = await sb.from('matches').select('*').order('match_date');
   matches = data || [];
 
-  // Если матчей нет — пробуем подтянуть из API
-  if (matches.length === 0 && FOOTBALL_API_KEY !== 'NO_KEY') {
-    await fetchMatchesFromAPI();
-    const { data: fresh } = await sb.from('matches').select('*').order('match_date');
-    matches = fresh || [];
-  }
+  // Матчи загружаются только из БД (расписание внесено через SQL)
 }
 
 async function loadMyPreds() {
@@ -783,10 +854,13 @@ function renderScoreboard() {
 function renderAvatar(elId, player) {
   const el = document.getElementById(elId);
   if (!el) return;
-  if (player.avatar_url) {
-    el.innerHTML = '<img src="' + player.avatar_url + '" style="width:100%;height:100%;object-fit:cover;">';
+  el.style.width = '52px';
+  el.style.height = '52px';
+  if (player && player.avatar_url) {
     el.style.background = 'transparent';
-  } else {
+    el.innerHTML = '<img src="' + player.avatar_url + '" style="width:52px;height:52px;object-fit:cover;border-radius:50%;" onerror="this.parentElement.textContent='' + player.nickname.charAt(0).toUpperCase() + ''">';
+  } else if (player) {
+    el.innerHTML = '';
     el.textContent = player.nickname.charAt(0).toUpperCase();
   }
 }
