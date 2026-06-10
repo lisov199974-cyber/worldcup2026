@@ -445,7 +445,7 @@ const WINNER_TEAMS = [
 const FLAG_CODE = {
   'Mexico':'mx','South Africa':'za','South Korea':'kr','Czechia':'cz',
   'Canada':'ca','Bosnia and Herzegovina':'ba','Qatar':'qa','Switzerland':'ch',
-  'Brazil':'br','Morocco':'ma','Haiti':'ht','Scotland':null,
+  'Brazil':'br','Morocco':'ma','Haiti':'ht','Scotland':'gb-sct',
   'USA':'us','Paraguay':'py','Australia':'au','Turkey':'tr',
   'Germany':'de','Ecuador':'ec','Ivory Coast':'ci','Curacao':'cw',
   'Netherlands':'nl','Japan':'jp','Tunisia':'tn','Ukraine':'ua',
@@ -455,16 +455,19 @@ const FLAG_CODE = {
   'Argentina':'ar','Austria':'at','Algeria':'dz','Jordan':'jo',
   'Portugal':'pt','Croatia':'hr','England':'gb-eng',
   'Ghana':'gh','Panama':'pa',
+  'Sweden':'se','DR Congo':'cd','Uzbekistan':'uz','Colombia':'co',
 };
 
 function flagImg(teamName, size) {
   const w = size || 54; const h = size ? Math.round(size*0.67) : 38;
   const code = FLAG_CODE[teamName];
-  const EMOJI_FLAGS={'Scotland':'🏴󠁧󠁢󠁳󠁣󠁴󠁿','England':'🏴󠁧󠁢󠁥󠁮󠁧󠁿'}; if (!code) { const em=EMOJI_FLAGS[teamName]||'🏳'; return '<div style="font-size:'+(h-4)+'px;display:flex;align-items:center;justify-content:center;width:'+w+'px;height:'+h+'px;">'+em+'</div>'; }
-  // Use SVG for crisp quality at any size
-  return '<img src="https://flagcdn.com/'+code+'.svg" ' +
-    'style="width:'+w+'px;height:'+h+'px;object-fit:cover;display:block;" ' +
-    'alt="'+teamName+'">';
+  if (!code) return '<div style="font-size:22px;display:flex;align-items:center;justify-content:center;width:'+w+'px;height:'+h+'px;">🏳</div>';
+  // gb-sct and gb-eng use flag-icons CDN, others use flagcdn
+  let src;
+  if (code === 'gb-sct') src = 'https://flagicons.lipis.dev/flags/4x3/gb-sct.svg';
+  else if (code === 'gb-eng') src = 'https://flagicons.lipis.dev/flags/4x3/gb-eng.svg';
+  else src = 'https://flagcdn.com/' + code + '.svg';
+  return '<img src="' + src + '" style="width:' + w + 'px;height:' + h + 'px;object-fit:cover;display:block;" alt="' + teamName + '">';
 }
 
 
