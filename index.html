@@ -1006,23 +1006,28 @@ async function calculatePoints(matchId, realHome, realAway) {
   const { data: pointRows } = await sb.from('points').select('*').eq('match_id', matchId);
   const correctWinners = (pointRows || []).filter(p => p.reason === 'correct_winner');
 
-  if (correctWinners.length === 2) {
-    // Определяем кто ближе
-    const scores = correctWinners.map(p => {
-      const pred = predsMap[p.player_id];
-      const diff = Math.abs(pred.home_score - realHome) + Math.abs(pred.away_score - realAway);
-      return { player_id: p.player_id, diff };
-    });
+  const getDiff = (playerId) => {
+    const pred = predsMap[playerId];
+    if (!pred) return 999;
+    return Math.abs(pred.home_score - realHome) + Math.abs(pred.away_score - realAway);
+  };
 
-    if (scores[0].diff < scores[1].diff) {
-      await sb.from('points').update({ pts: 3, reason: 'closer' }).eq('player_id', scores[0].player_id).eq('match_id', matchId);
-    } else if (scores[1].diff < scores[0].diff) {
-      await sb.from('points').update({ pts: 3, reason: 'closer' }).eq('player_id', scores[1].player_id).eq('match_id', matchId);
+  if (correctWinners.length === 2) {
+    // Оба угадали — кто ближе получает 3, кто дальше 1
+    const d0 = getDiff(correctWinners[0].player_id);
+    const d1 = getDiff(correctWinners[1].player_id);
+    if (d0 < d1) {
+      await sb.from('points').update({ pts: 3, reason: 'closer' }).eq('player_id', correctWinners[0].player_id).eq('match_id', matchId);
+    } else if (d1 < d0) {
+      await sb.from('points').update({ pts: 3, reason: 'closer' }).eq('player_id', correctWinners[1].player_id).eq('match_id', matchId);
     }
-    // Если одинаковое расстояние — оба получают 1
+    // Если одинаковое расстояние — оба получают 1 (уже стоит)
   } else if (correctWinners.length === 1) {
-    // Один угадал, второй нет — у него 3 (единственный кто угадал победителя)
-    await sb.from('points').update({ pts: 3, reason: 'closer' }).eq('player_id', correctWinners[0].player_id).eq('match_id', matchId);
+    // Один угадал — проверяем насколько близко
+    const diff = getDiff(correctWinners[0].player_id);
+    const pts = diff <= 2 ? 3 : 1; // близко (<= 2 голов разницы) = 3, далеко = 1
+    const reason = diff <= 2 ? 'closer' : 'correct_winner';
+    await sb.from('points').update({ pts, reason }).eq('player_id', correctWinners[0].player_id).eq('match_id', matchId);
   }
 }
 
