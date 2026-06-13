@@ -924,9 +924,13 @@ async function syncMatchResults() {
     const data = await res.json();
     if (!data.matches || !data.matches.length) return;
 
-    const { data: pending } = await sb.from('matches')
-      .select('*').neq('status', 'FINISHED');
-    if (!pending || !pending.length) return;
+    // Load ALL matches (not just pending) to handle already-FINISHED ones without points
+    const { data: allMatches } = await sb.from('matches').select('*');
+    if (!allMatches || !allMatches.length) return;
+
+    // Load existing points to check which matches already have points calculated
+    const { data: existingPoints } = await sb.from('points').select('match_id');
+    const matchesWithPoints = new Set((existingPoints || []).map(p => p.match_id));
 
     for (const m of data.matches) {
       const homeScore = m.score?.fullTime?.home;
@@ -934,10 +938,10 @@ async function syncMatchResults() {
       if (homeScore === null || homeScore === undefined) continue;
       if (awayScore === null || awayScore === undefined) continue;
 
-      const apiHome = m.homeTeam?.name || '';
-      const apiAway = m.awayTeam?.name || '';
+      const apiHome = APIF_TEAM_MAP[m.homeTeam?.name] || m.homeTeam?.name || '';
+      const apiAway = APIF_TEAM_MAP[m.awayTeam?.name] || m.awayTeam?.name || '';
 
-      const match = pending.find(p => {
+      const match = allMatches.find(p => {
         const ph = p.home_team.toLowerCase();
         const pa = p.away_team.toLowerCase();
         const ah = apiHome.toLowerCase();
@@ -947,14 +951,21 @@ async function syncMatchResults() {
       });
       if (!match) continue;
 
-      await sb.from('matches').update({
-        status: 'FINISHED',
-        home_score: homeScore,
-        away_score: awayScore
-      }).eq('id', match.id);
+      // Update status if not already FINISHED
+      if (match.status !== 'FINISHED') {
+        await sb.from('matches').update({
+          status: 'FINISHED',
+          home_score: homeScore,
+          away_score: awayScore
+        }).eq('id', match.id);
+        console.log('Synced:', apiHome, homeScore, '-', awayScore, apiAway);
+      }
 
-      await calculatePoints(match.id, homeScore, awayScore);
-      console.log('Synced:', apiHome, homeScore, '-', awayScore, apiAway);
+      // Calculate points if not yet calculated
+      if (!matchesWithPoints.has(match.id)) {
+        await calculatePoints(match.id, homeScore, awayScore);
+        console.log('Points calculated for:', match.home_team, 'vs', match.away_team);
+      }
     }
 
     await loadMatches();
