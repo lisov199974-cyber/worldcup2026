@@ -1249,6 +1249,7 @@ function renderMatchCard(m) {
 
   const stageLabel = m.group_name || stageToRu(m.stage);
   const time = formatTime(m.match_date);
+  const matchStarted = new Date(m.match_date).getTime() <= Date.now();
 
   let bottomHtml = '';
 
@@ -1266,7 +1267,9 @@ function renderMatchCard(m) {
   } else {
     const myName = myPlayer?.nickname || 'Я';
     const myVal = myPred ? myPred.home_score + ':' + myPred.away_score : null;
-    const myPts = myPred ? '<div class="mc-pred-val">' + myVal + ' ✓</div>' : '<div class="mc-pred-wait">Сделать →</div>';
+    const myPts = myPred ? '<div class="mc-pred-val">' + myVal + ' ✓</div>' :
+                  matchStarted ? '<div class="mc-pred-wait">Время истекло</div>' :
+                  '<div class="mc-pred-wait">Сделать →</div>';
     const otherPts = otherPred ? '<div class="mc-pred-wait">Ждём...</div>' : '<div class="mc-pred-wait">—</div>';
     const otherPlayer = allPlayers.find(p => p.id !== myPlayer?.id);
     const otherName = otherPlayer?.nickname || '?';
@@ -1277,7 +1280,7 @@ function renderMatchCard(m) {
     '</div>';
   }
 
-  const clickable = m.status === 'SCHEDULED' && !myPred;
+  const clickable = m.status === 'SCHEDULED' && !myPred && !matchStarted;
   return '<div class="match-card"' + (clickable ? ' onclick="openPredict(\'' + m.id + '\')"' : '') + '>' +
     '<div class="mc-meta"><div class="mc-badge">' + stageLabel + '</div><div class="mc-time">' + time + '</div></div>' +
     '<div class="mc-teams">' +
@@ -1309,6 +1312,10 @@ async function openPredict(matchId) {
   currentMatchId = matchId;
   const m = matches.find(x => x.id === matchId);
   if (!m) return;
+  if (new Date(m.match_date).getTime() <= Date.now()) {
+    toast('Матч уже начался');
+    return;
+  }
 
   document.getElementById('pm-title').textContent = 'Прогноз';
   document.getElementById('pm-sub').textContent = m.home_team + ' — ' + m.away_team + ' · ' + formatDate(m.match_date) + ' · ' + formatTime(m.match_date);
@@ -1337,6 +1344,13 @@ async function submitPredict() {
   const s1 = document.getElementById('pm-s1').value;
   const s2 = document.getElementById('pm-s2').value;
   if (s1 === '' || s2 === '') { toast('Введи счёт'); return; }
+
+  const m = matches.find(x => x.id === currentMatchId);
+  if (m && new Date(m.match_date).getTime() <= Date.now()) {
+    toast('Матч уже начался, прогноз не принят');
+    closeModal('m-predict');
+    return;
+  }
 
   const btn = document.getElementById('pm-confirm');
   btn.disabled = true;
