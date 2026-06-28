@@ -83,6 +83,7 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 .mc-flag-box img { width: 100%; height: 100%; object-fit: cover; }
 .modal-flag-box img { width: 100%; height: 100%; object-fit: cover; }
 .mc-tname { font-size: 9px; font-weight: 600; color: var(--text); text-align: center; }
+.mc-tname-tbd { font-style: italic; color: var(--text3); font-weight: 500; }
 .mc-center { display: flex; flex-direction: column; align-items: center; padding: 0 6px; flex-shrink: 0; }
 .mc-vs { font-size: 13px; font-weight: 700; color: var(--text3); }
 .mc-bottom { padding: 8px 10px 10px; display: flex; gap: 6px; }
@@ -191,6 +192,28 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 .toast { position: absolute; top: 16px; left: 50%; transform: translateX(-50%); background: rgba(30,30,40,0.95); border: 1px solid rgba(255,255,255,0.12); border-radius: 20px; padding: 10px 18px; font-size: 11px; font-weight: 500; z-index: 500; opacity: 0; transition: opacity .3s; pointer-events: none; white-space: nowrap; color: var(--text); font-family: 'Unbounded', sans-serif; }
 .toast.show { opacity: 1; }
 
+/* TABLE TABS */
+.table-tabs { display: flex; gap: 8px; padding: 0 12px 12px; }
+.table-tab { flex: 1; background: var(--bg2); border: 1px solid var(--border); color: var(--text3); font-size: 9px; font-weight: 700; padding: 10px 6px; border-radius: 10px; cursor: pointer; font-family: 'Unbounded', sans-serif; letter-spacing: 0.3px; }
+.table-tab.active { background: var(--accent); color: #0a0a0a; border-color: var(--accent); }
+
+/* BRACKET */
+.bracket-wrap { overflow-x: auto; padding: 0 12px 16px; -webkit-overflow-scrolling: touch; }
+.bracket-stage { display: inline-flex; flex-direction: column; vertical-align: top; margin-right: 10px; min-width: 150px; }
+.bracket-stage-title { font-size: 9px; font-weight: 700; color: var(--text3); text-transform: uppercase; letter-spacing: 0.6px; text-align: center; margin-bottom: 8px; }
+.bracket-matches { display: flex; flex-direction: column; justify-content: space-around; flex: 1; gap: 10px; }
+.bracket-match { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; padding: 8px; width: 150px; }
+.bracket-match.has-winner { border-color: rgba(200,255,0,0.25); }
+.bracket-team { display: flex; align-items: center; gap: 6px; padding: 4px 2px; border-radius: 6px; }
+.bracket-team.winner { background: rgba(200,255,0,0.08); }
+.bracket-team-flag { width: 16px; height: 11px; border-radius: 2px; object-fit: cover; flex-shrink: 0; }
+.bracket-team-name { font-size: 9px; color: var(--text); font-weight: 500; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bracket-team-name.tbd { color: var(--text3); font-style: italic; }
+.bracket-team-name.winner-name { color: var(--accent); font-weight: 700; }
+.bracket-score { font-size: 10px; font-weight: 700; color: var(--text2); }
+.bracket-vs-line { height: 1px; background: var(--bg3); margin: 2px 0; }
+.bracket-date { font-size: 7px; color: var(--text3); text-align: center; margin-top: 4px; }
+
 /* LOADER */
 .loader { display: flex; align-items: center; justify-content: center; padding: 50px 20px; flex-direction: column; gap: 12px; }
 .spin { width: 24px; height: 24px; border: 2px solid var(--bg3); border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite; }
@@ -266,6 +289,10 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
     <!-- TABLE -->
     <div class="screen" id="s-table">
       <div class="topbar"><div class="topbar-title">ТАБЛИЦА</div></div>
+      <div class="table-tabs">
+        <button class="table-tab active" id="tt-bracket" onclick="switchTableTab('bracket')">СЕТКА ПЛЕЙ-ОФФ</button>
+        <button class="table-tab" id="tt-groups" onclick="switchTableTab('groups')">ГРУППЫ</button>
+      </div>
       <div id="table-content" style="padding-bottom:90px;">
         <div class="loader"><div class="spin"></div><div class="loader-text">Загружаем данные...</div></div>
       </div>
@@ -966,14 +993,69 @@ async function syncMatchResults() {
         await calculatePoints(match.id, homeScore, awayScore);
         console.log('Points calculated for:', match.home_team, 'vs', match.away_team);
       }
+
+      // Advance winner in playoff bracket (knockout stages only)
+      if (match.stage !== 'GROUP_STAGE' && match.next_match_id) {
+        await advanceWinner(match, homeScore, awayScore, m);
+      }
     }
 
     await loadMatches();
     await loadAllPoints();
     renderScoreboard();
     renderMatches();
+    // Если открыта вкладка таблицы — обновляем её тоже
+    if (document.getElementById('s-table')?.classList.contains('active')) {
+      loadTable();
+    }
   } catch(e) {
     console.error('Sync error:', e);
+  }
+}
+
+// =============================================
+// ПРОДВИЖЕНИЕ ПОБЕДИТЕЛЯ В СЕТКЕ ПЛЕЙ-ОФФ
+// =============================================
+async function advanceWinner(match, homeScore, awayScore, apiMatch) {
+  try {
+    let winnerName, winnerFlag;
+
+    if (homeScore > awayScore) {
+      winnerName = match.home_team; winnerFlag = match.home_flag;
+    } else if (awayScore > homeScore) {
+      winnerName = match.away_team; winnerFlag = match.away_flag;
+    } else {
+      // Draw after 90 min — check penalties from API if available
+      const pens = apiMatch?.score?.penalties;
+      if (pens && pens.home !== null && pens.away !== null) {
+        winnerName = pens.home > pens.away ? match.home_team : match.away_team;
+        winnerFlag = pens.home > pens.away ? match.home_flag : match.away_flag;
+      } else {
+        // Can't determine winner yet (penalties not in API) — skip advancement
+        return;
+      }
+    }
+
+    const nextMatch = (await sb.from('matches').select('*').eq('id', match.next_match_id).single()).data;
+    if (!nextMatch) return;
+
+    const slot = match.next_match_slot; // 'home' or 'away'
+    const updateField = slot === 'home'
+      ? { home_team: winnerName, home_flag: winnerFlag }
+      : { away_team: winnerName, away_flag: winnerFlag };
+
+    // Only update if still TBD (avoid overwriting)
+    const currentVal = slot === 'home' ? nextMatch.home_team : nextMatch.away_team;
+    if (currentVal === 'TBD') {
+      // Check if both slots will be filled -> move from PENDING to SCHEDULED
+      const otherVal = slot === 'home' ? nextMatch.away_team : nextMatch.home_team;
+      const newStatus = (otherVal !== 'TBD') ? 'SCHEDULED' : nextMatch.status;
+
+      await sb.from('matches').update({ ...updateField, status: newStatus }).eq('id', match.next_match_id);
+      console.log('Advanced', winnerName, 'to', match.next_match_id, slot);
+    }
+  } catch(e) {
+    console.error('Advance winner error:', e);
   }
 }// =============================================
 // ПОДСЧЁТ ОЧКОВ
@@ -1026,6 +1108,7 @@ async function calculatePoints(matchId, realHome, realAway) {
   // Второй проход: кто ближе к счёту среди угадавших победителя
   const { data: pointRows } = await sb.from('points').select('*').eq('match_id', matchId);
   const correctWinners = (pointRows || []).filter(p => p.reason === 'correct_winner');
+  const exactScorers = (pointRows || []).filter(p => p.reason === 'exact');
 
   const getDiff = (playerId) => {
     const pred = predsMap[playerId];
@@ -1033,7 +1116,12 @@ async function calculatePoints(matchId, realHome, realAway) {
     return Math.abs(pred.home_score - realHome) + Math.abs(pred.away_score - realAway);
   };
 
-  if (correctWinners.length === 2) {
+  if (exactScorers.length > 0) {
+    // Кто-то угадал точный счёт — угадавшие исход (но не точный счёт) получают только 1, без бонуса за близость
+    for (const cw of correctWinners) {
+      await sb.from('points').update({ pts: 1, reason: 'correct_winner' }).eq('player_id', cw.player_id).eq('match_id', matchId);
+    }
+  } else if (correctWinners.length === 2) {
     // Оба угадали — кто ближе получает 3, кто дальше 1
     const d0 = getDiff(correctWinners[0].player_id);
     const d1 = getDiff(correctWinners[1].player_id);
@@ -1199,9 +1287,8 @@ async function submitWinner() {
 function renderMatches() {
   const container = document.getElementById('matches-list');
 
-  // Фильтруем — показываем только предстоящие и текущие
-  // Завершённые скрываем (они в истории)
-  const upcoming = matches.filter(m => m.status !== 'FINISHED');
+  // Фильтруем — показываем только предстоящие и текущие, скрываем PENDING (команды ещё TBD)
+  const upcoming = matches.filter(m => m.status !== 'FINISHED' && m.status !== 'PENDING');
 
   if (upcoming.length === 0) {
     // Если API ключ не настроен — показываем заглушку
@@ -1281,12 +1368,16 @@ function renderMatchCard(m) {
   }
 
   const clickable = m.status === 'SCHEDULED' && !myPred && !matchStarted;
+  const homeDisplay = m.home_team === 'TBD' ? (m.home_placeholder || 'Не определено') : m.home_team;
+  const awayDisplay = m.away_team === 'TBD' ? (m.away_placeholder || 'Не определено') : m.away_team;
+  const homeNameClass = m.home_team === 'TBD' ? 'mc-tname mc-tname-tbd' : 'mc-tname';
+  const awayNameClass = m.away_team === 'TBD' ? 'mc-tname mc-tname-tbd' : 'mc-tname';
   return '<div class="match-card"' + (clickable ? ' onclick="openPredict(\'' + m.id + '\')"' : '') + '>' +
     '<div class="mc-meta"><div class="mc-badge">' + stageLabel + '</div><div class="mc-time">' + time + '</div></div>' +
     '<div class="mc-teams">' +
-      '<div class="mc-team"><div class="mc-flag-box">' + flagImg(m.home_team) + '</div><div class="mc-tname">' + m.home_team + '</div></div>' +
+      '<div class="mc-team"><div class="mc-flag-box">' + flagImg(m.home_team) + '</div><div class="' + homeNameClass + '">' + homeDisplay + '</div></div>' +
       '<div class="mc-center"><div class="mc-vs">vs</div></div>' +
-      '<div class="mc-team"><div class="mc-flag-box">' + flagImg(m.away_team) + '</div><div class="mc-tname">' + m.away_team + '</div></div>' +
+      '<div class="mc-team"><div class="mc-flag-box">' + flagImg(m.away_team) + '</div><div class="' + awayNameClass + '">' + awayDisplay + '</div></div>' +
     '</div>' +
     bottomHtml +
   '</div>';
@@ -1380,9 +1471,122 @@ async function submitPredict() {
 }
 
 // =============================================
-// ТАБЛИЦА ТУРНИРА
+// ВКЛАДКА ТАБЛИЦА: ПЕРЕКЛЮЧЕНИЕ ГРУППЫ / СЕТКА
 // =============================================
+let currentTableTab = 'bracket';
+
+function switchTableTab(tab) {
+  currentTableTab = tab;
+  document.getElementById('tt-bracket').classList.toggle('active', tab === 'bracket');
+  document.getElementById('tt-groups').classList.toggle('active', tab === 'groups');
+  if (tab === 'bracket') renderBracket();
+  else loadGroupsTable();
+}
+
 async function loadTable() {
+  if (currentTableTab === 'bracket') await renderBracket();
+  else await loadGroupsTable();
+}
+
+// =============================================
+// СЕТКА ПЛЕЙ-ОФФ
+// =============================================
+async function renderBracket() {
+  const el = document.getElementById('table-content');
+  el.innerHTML = '<div class="loader"><div class="spin"></div><div class="loader-text">Загружаем сетку...</div></div>';
+
+  const { data: koMatches } = await sb.from('matches')
+    .select('*')
+    .neq('stage', 'GROUP_STAGE')
+    .order('match_date');
+
+  if (!koMatches || !koMatches.length) {
+    el.innerHTML = '<div class="empty">Плей-офф ещё не начался</div>';
+    return;
+  }
+
+  const STAGE_ORDER = ['ROUND_OF_32', 'ROUND_OF_16', 'QUARTER_FINALS', 'SEMI_FINALS', 'FINAL'];
+  const STAGE_LABELS = {
+    'ROUND_OF_32': '1/16 финала',
+    'ROUND_OF_16': '1/8 финала',
+    'QUARTER_FINALS': '1/4 финала',
+    'SEMI_FINALS': '1/2 финала',
+    'FINAL': 'Финал',
+  };
+
+  const byStage = {};
+  koMatches.forEach(m => {
+    if (!byStage[m.stage]) byStage[m.stage] = [];
+    byStage[m.stage].push(m);
+  });
+
+  let html = '<div class="bracket-wrap"><div style="display:flex;">';
+
+  STAGE_ORDER.forEach(stage => {
+    const stageMatches = byStage[stage];
+    if (!stageMatches || !stageMatches.length) return;
+
+    html += '<div class="bracket-stage">';
+    html += '<div class="bracket-stage-title">' + STAGE_LABELS[stage] + '</div>';
+    html += '<div class="bracket-matches">';
+
+    stageMatches.forEach(m => {
+      const isFinished = m.status === 'FINISHED';
+      const homeFlag = m.home_team !== 'TBD' ? flagImgSmall(m.home_team) : '';
+      const awayFlag = m.away_team !== 'TBD' ? flagImgSmall(m.away_team) : '';
+      const homeName = m.home_team === 'TBD' ? (m.home_placeholder || '—') : m.home_team;
+      const awayName = m.away_team === 'TBD' ? (m.away_placeholder || '—') : m.away_team;
+      const homeIsTbd = m.home_team === 'TBD';
+      const awayIsTbd = m.away_team === 'TBD';
+
+      let homeWinnerClass = '', awayWinnerClass = '';
+      let homeNameClass = homeIsTbd ? 'bracket-team-name tbd' : 'bracket-team-name';
+      let awayNameClass = awayIsTbd ? 'bracket-team-name tbd' : 'bracket-team-name';
+
+      if (isFinished) {
+        if (m.home_score > m.away_score) { homeWinnerClass = ' winner'; homeNameClass += ' winner-name'; }
+        else if (m.away_score > m.home_score) { awayWinnerClass = ' winner'; awayNameClass += ' winner-name'; }
+      }
+
+      const dateStr = formatDate(m.match_date) + ' · ' + formatTime(m.match_date);
+
+      html += '<div class="bracket-match' + (isFinished ? ' has-winner' : '') + '">' +
+        '<div class="bracket-team' + homeWinnerClass + '">' +
+          homeFlag +
+          '<div class="' + homeNameClass + '">' + homeName + '</div>' +
+          (isFinished ? '<div class="bracket-score">' + m.home_score + '</div>' : '') +
+        '</div>' +
+        '<div class="bracket-vs-line"></div>' +
+        '<div class="bracket-team' + awayWinnerClass + '">' +
+          awayFlag +
+          '<div class="' + awayNameClass + '">' + awayName + '</div>' +
+          (isFinished ? '<div class="bracket-score">' + m.away_score + '</div>' : '') +
+        '</div>' +
+        (!isFinished && !homeIsTbd && !awayIsTbd ? '<div class="bracket-date">' + dateStr + '</div>' : '') +
+      '</div>';
+    });
+
+    html += '</div></div>';
+  });
+
+  html += '</div></div>';
+  el.innerHTML = html;
+}
+
+function flagImgSmall(teamName) {
+  const code = FLAG_CODE[teamName];
+  if (!code) return '<span style="font-size:11px;">🏳</span>';
+  let src;
+  if (code === 'gb-sct') src = 'https://flagicons.lipis.dev/flags/4x3/gb-sct.svg';
+  else if (code === 'gb-eng') src = 'https://flagicons.lipis.dev/flags/4x3/gb-eng.svg';
+  else src = 'https://flagcdn.com/' + code + '.svg';
+  return '<img src="' + src + '" class="bracket-team-flag">';
+}
+
+// =============================================
+// ТАБЛИЦА ГРУПП (АРХИВ)
+// =============================================
+async function loadGroupsTable() {
   const el = document.getElementById('table-content');
   el.innerHTML = '<div class="loader"><div class="spin"></div><div class="loader-text">Считаем таблицу...</div></div>';
 
