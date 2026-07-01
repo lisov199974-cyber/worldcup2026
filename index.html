@@ -994,10 +994,8 @@ async function syncMatchResults() {
         console.log('Points calculated for:', match.home_team, 'vs', match.away_team);
       }
 
-      // Advance winner in playoff bracket (knockout stages only)
-      if (match.stage !== 'GROUP_STAGE' && match.next_match_id) {
-        await advanceWinner(match, homeScore, awayScore, m);
-      }
+      // advanceWinner отключён — пары плей-офф вносятся вручную через SQL
+      // т.к. FIFA использует нестандартную схему сетки
     }
 
     await loadMatches();
@@ -1068,20 +1066,14 @@ async function calculatePoints(matchId, realHome, realAway) {
 
   const realWinner = realHome > realAway ? 'home' : realAway > realHome ? 'away' : 'draw';
 
-  // Для каждого зарегистрированного игрока
+  // Для каждого зарегистрированного игрока — используем upsert без проверки existing
+  // чтобы гарантированно создать запись для каждого игрока
   for (const player of allPlayers) {
     const pred = predsMap[player.id];
-
-    // Проверяем нет ли уже записи
-    const { data: existing } = await sb.from('points')
-      .select('id').eq('player_id', player.id).eq('match_id', matchId).single();
-    if (existing) continue;
-
     let pts = 0;
     let reason = 'wrong';
 
     if (!pred) {
-      // Не внёс прогноз
       pts = -1;
       reason = 'no_prediction';
     } else {
@@ -1089,12 +1081,10 @@ async function calculatePoints(matchId, realHome, realAway) {
                          pred.away_score > pred.home_score ? 'away' : 'draw';
 
       if (pred.home_score === realHome && pred.away_score === realAway) {
-        // Точный счёт
         pts = 5;
         reason = 'exact';
       } else if (predWinner === realWinner) {
-        // Угадал победителя — нужно сравнить с другим игроком
-        pts = 1; // минимум
+        pts = 1;
         reason = 'correct_winner';
       } else {
         pts = 0;
@@ -1102,7 +1092,11 @@ async function calculatePoints(matchId, realHome, realAway) {
       }
     }
 
-    await sb.from('points').upsert({ player_id: player.id, match_id: matchId, pts, reason }, { onConflict: 'player_id,match_id' });
+    // upsert — создаст если нет, обновит если есть
+    await sb.from('points').upsert(
+      { player_id: player.id, match_id: matchId, pts, reason },
+      { onConflict: 'player_id,match_id' }
+    );
   }
 
   // Второй проход: кто ближе к счёту среди угадавших победителя
