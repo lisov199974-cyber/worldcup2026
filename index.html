@@ -1123,6 +1123,19 @@ async function calculatePoints(matchId, realHome, realAway) {
   const predsMap = {};
   (preds || []).forEach(p => { predsMap[p.player_id] = p; });
 
+  // Если очки уже посчитаны — не трогаем
+  const { data: existingPts } = await sb.from('points').select('id').eq('match_id', matchId).limit(1);
+  if (existingPts && existingPts.length > 0) {
+    console.log('Skipping', matchId, '— points already calculated');
+    return;
+  }
+
+  // Если вообще нет ни одного предикта на этот матч — пропускаем
+  if (!preds || preds.length === 0) {
+    console.log('Skipping', matchId, '— no predictions found');
+    return;
+  }
+
   const realWinner = realHome > realAway ? 'home' : realAway > realHome ? 'away' : 'draw';
 
   for (const player of allPlayers) {
