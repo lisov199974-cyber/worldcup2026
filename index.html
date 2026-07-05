@@ -994,10 +994,7 @@ async function syncMatchResults() {
         console.log('Points calculated for:', match.home_team, 'vs', match.away_team);
       }
 
-      // Advance winner in playoff bracket using FIFA 2026 fixed bracket structure
-      if (match.stage !== 'GROUP_STAGE') {
-        await advanceWinner(match, homeScore, awayScore, m);
-      }
+      // advanceWinner отключён — пары вносятся вручную
     }
 
     await loadMatches();
