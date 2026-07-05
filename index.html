@@ -994,7 +994,10 @@ async function syncMatchResults() {
         console.log('Points calculated for:', match.home_team, 'vs', match.away_team);
       }
 
-      // advanceWinner отключён — пары вносятся вручную
+      // Advance winner in playoff bracket using correct FIFA 2026 bracket
+      if (match.stage !== 'GROUP_STAGE') {
+        await advanceWinner(match, homeScore, awayScore, m);
+      }
     }
 
     await loadMatches();
@@ -1014,37 +1017,46 @@ async function syncMatchResults() {
 // ПРОДВИЖЕНИЕ ПОБЕДИТЕЛЯ В СЕТКЕ ПЛЕЙ-ОФФ
 // =============================================
 
-// FIFA 2026 fixed bracket: match_id -> {next_match_id, slot}
+// FIFA 2026 fixed bracket (official from FIFA.com/CBS/FOX Sports)
+// Match numbers: 89=ko17, 90=ko18, 91=ko19, 92=ko20, 93=ko21, 94=ko22, 95=ko23, 96=ko24
+// QF: 97=ko25(Boston), 98=ko26(LA), 99=ko27(Miami), 100=ko28(KC)
+// SF: 101=ko29(Dallas), 102=ko30(Atlanta)
 const FIFA_BRACKET = {
-  // Round of 32 -> Round of 16
-  'ko1':  { next: 'ko17', slot: 'home' },
-  'ko4':  { next: 'ko17', slot: 'away' },
-  'ko2':  { next: 'ko18', slot: 'home' },
-  'ko3':  { next: 'ko18', slot: 'away' },
-  'ko5':  { next: 'ko19', slot: 'home' },
-  'ko7':  { next: 'ko19', slot: 'away' },
-  'ko6':  { next: 'ko20', slot: 'home' },
-  'ko8':  { next: 'ko20', slot: 'away' },
-  'ko12': { next: 'ko21', slot: 'home' },
-  'ko11': { next: 'ko21', slot: 'away' },
-  'ko9':  { next: 'ko22', slot: 'home' },
-  'ko10': { next: 'ko22', slot: 'away' },
-  'ko15': { next: 'ko23', slot: 'home' },
-  'ko14': { next: 'ko23', slot: 'away' },
-  'ko16': { next: 'ko24', slot: 'home' },
-  'ko13': { next: 'ko24', slot: 'away' },
-  // Round of 16 -> Quarter-finals
+  // Round of 32 -> Round of 16 (per official FIFA bracket)
+  'ko1':  { next: 'ko17', slot: 'away' }, // Canada -> ko17 away
+  'ko4':  { next: 'ko17', slot: 'home' }, // Morocco -> ko17 home (Morocco won)
+  'ko3':  { next: 'ko18', slot: 'home' }, // Paraguay -> ko18 home
+  'ko6':  { next: 'ko18', slot: 'away' }, // France -> ko18 away
+  'ko2':  { next: 'ko19', slot: 'home' }, // Brazil -> ko19 home
+  'ko5':  { next: 'ko19', slot: 'away' }, // Norway -> ko19 away
+  'ko7':  { next: 'ko20', slot: 'home' }, // Mexico -> ko20 home
+  'ko8':  { next: 'ko20', slot: 'away' }, // England -> ko20 away
+  'ko12': { next: 'ko21', slot: 'home' }, // Portugal -> ko21 home
+  'ko11': { next: 'ko21', slot: 'away' }, // Spain -> ko21 away
+  'ko10': { next: 'ko22', slot: 'home' }, // USA -> ko22 home
+  'ko9':  { next: 'ko22', slot: 'away' }, // Belgium -> ko22 away
+  'ko15': { next: 'ko23', slot: 'home' }, // Argentina -> ko23 home
+  'ko14': { next: 'ko23', slot: 'away' }, // Egypt -> ko23 away
+  'ko13': { next: 'ko24', slot: 'home' }, // Switzerland -> ko24 home
+  'ko16': { next: 'ko24', slot: 'away' }, // Colombia -> ko24 away
+  // Round of 16 -> Quarter-finals (official FIFA match numbers)
+  // QF1 Boston (M97): winner M89(ko17) + winner M90(ko18)
   'ko17': { next: 'ko25', slot: 'home' },
   'ko18': { next: 'ko25', slot: 'away' },
-  'ko19': { next: 'ko26', slot: 'home' },
-  'ko20': { next: 'ko26', slot: 'away' },
-  'ko21': { next: 'ko27', slot: 'home' },
-  'ko22': { next: 'ko27', slot: 'away' },
+  // QF2 LA (M98): winner M93(ko21) + winner M94(ko22)
+  'ko21': { next: 'ko26', slot: 'home' },
+  'ko22': { next: 'ko26', slot: 'away' },
+  // QF3 Miami (M99): winner M91(ko19) + winner M92(ko20)
+  'ko19': { next: 'ko27', slot: 'home' },
+  'ko20': { next: 'ko27', slot: 'away' },
+  // QF4 KC (M100): winner M95(ko23) + winner M96(ko24)
   'ko23': { next: 'ko28', slot: 'home' },
   'ko24': { next: 'ko28', slot: 'away' },
   // Quarter-finals -> Semi-finals
+  // SF1 Dallas (M101): QF1(ko25) + QF2(ko26)
   'ko25': { next: 'ko29', slot: 'home' },
   'ko26': { next: 'ko29', slot: 'away' },
+  // SF2 Atlanta (M102): QF3(ko27) + QF4(ko28)
   'ko27': { next: 'ko30', slot: 'home' },
   'ko28': { next: 'ko30', slot: 'away' },
   // Semi-finals -> Final
