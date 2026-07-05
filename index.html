@@ -1103,3 +1103,522 @@ async function advanceWinner(match, homeScore, awayScore, apiMatch) {
     console.error('Advance winner error:', e);
   }
 }
+
+
+
+// =============================================
+// ПОДСЧЁТ ОЧКОВ
+// =============================================
+async function calculatePoints(matchId, realHome, realAway) {
+  const { data: preds } = await sb.from('predictions').select('*').eq('match_id', matchId);
+  const predsMap = {};
+  (preds || []).forEach(p => { predsMap[p.player_id] = p; });
+
+  const realWinner = realHome > realAway ? 'home' : realAway > realHome ? 'away' : 'draw';
+
+  for (const player of allPlayers) {
+    const pred = predsMap[player.id];
+    let pts = 0, reason = 'wrong';
+
+    if (!pred) {
+      pts = -1; reason = 'no_prediction';
+    } else {
+      const predWinner = pred.home_score > pred.away_score ? 'home' :
+                         pred.away_score > pred.home_score ? 'away' : 'draw';
+      if (pred.home_score === realHome && pred.away_score === realAway) {
+        pts = 5; reason = 'exact';
+      } else if (predWinner === realWinner) {
+        pts = 1; reason = 'correct_winner';
+      }
+    }
+    await sb.from('points').upsert({ player_id: player.id, match_id: matchId, pts, reason }, { onConflict: 'player_id,match_id' });
+  }
+
+  // Second pass: adjust correct_winner pts
+  const { data: pointRows } = await sb.from('points').select('*').eq('match_id', matchId);
+  const correctWinners = (pointRows || []).filter(p => p.reason === 'correct_winner');
+  const exactScorers = (pointRows || []).filter(p => p.reason === 'exact');
+
+  const getDiff = (playerId) => {
+    const pred = predsMap[playerId];
+    if (!pred) return 999;
+    return Math.abs(pred.home_score - realHome) + Math.abs(pred.away_score - realAway);
+  };
+
+  if (exactScorers.length > 0) {
+    for (const cw of correctWinners) {
+      await sb.from('points').update({ pts: 1, reason: 'correct_winner' }).eq('player_id', cw.player_id).eq('match_id', matchId);
+    }
+  } else if (correctWinners.length === 2) {
+    const d0 = getDiff(correctWinners[0].player_id);
+    const d1 = getDiff(correctWinners[1].player_id);
+    if (d0 < d1) {
+      await sb.from('points').update({ pts: 3, reason: 'closer' }).eq('player_id', correctWinners[0].player_id).eq('match_id', matchId);
+    } else if (d1 < d0) {
+      await sb.from('points').update({ pts: 3, reason: 'closer' }).eq('player_id', correctWinners[1].player_id).eq('match_id', matchId);
+    }
+  } else if (correctWinners.length === 1) {
+    const diff = getDiff(correctWinners[0].player_id);
+    const pts = diff <= 2 ? 3 : 1;
+    const reason = diff <= 2 ? 'closer' : 'correct_winner';
+    await sb.from('points').update({ pts, reason }).eq('player_id', correctWinners[0].player_id).eq('match_id', matchId);
+  }
+}
+
+// =============================================
+// РЕНДЕР СКОРБОРДА
+// =============================================
+function renderScoreboard() {
+  if (allPlayers.length === 0) return;
+  const totals = {};
+  allPlayers.forEach(p => { totals[p.id] = 0; });
+  Object.values(allPoints).forEach(pts => {
+    pts.forEach(p => { if (totals[p.player_id] !== undefined) totals[p.player_id] += p.pts; });
+  });
+  const p1 = allPlayers[0], p2 = allPlayers[1];
+  const av1 = document.getElementById('sb-av1');
+  const av2 = document.getElementById('sb-av2');
+  renderAvatar('sb-av1', p1);
+  document.getElementById('sb-nm1').textContent = p1.nickname;
+  document.getElementById('sb-sc1').textContent = totals[p1.id] || 0;
+  if (myPlayer && p1.id === myPlayer.id) { av1.style.cursor='pointer'; av1.onclick=openAvatarUpdate; }
+  else { av1.style.cursor='default'; av1.onclick=null; }
+  if (p2) {
+    renderAvatar('sb-av2', p2);
+    document.getElementById('sb-nm2').textContent = p2.nickname;
+    document.getElementById('sb-sc2').textContent = totals[p2.id] || 0;
+    if (myPlayer && p2.id === myPlayer.id) { av2.style.cursor='pointer'; av2.onclick=openAvatarUpdate; }
+    else { av2.style.cursor='default'; av2.onclick=null; }
+    const diff = (totals[p1.id]||0) - (totals[p2.id]||0);
+    const isMe = myPlayer && myPlayer.id === p1.id;
+    if (diff > 0) document.getElementById('sb-status').textContent = (isMe?'Ты ведёшь':p1.nickname+' ведёт')+' +'+diff+' очков 🔥';
+    else if (diff < 0) document.getElementById('sb-status').textContent = p2.nickname+' ведёт +'+Math.abs(diff)+' очков';
+    else document.getElementById('sb-status').textContent = 'Равный счёт! ⚖️';
+  } else {
+    document.getElementById('sb-nm2').textContent = 'Ждём...';
+    document.getElementById('sb-status').textContent = 'Жди второго игрока';
+  }
+}
+
+function renderAvatar(elId, player) {
+  const el = document.getElementById(elId);
+  if (!el || !player) return;
+  el.style.width='52px'; el.style.height='52px';
+  if (player.avatar_url) {
+    el.style.background='transparent';
+    const letter = player.nickname.charAt(0).toUpperCase();
+    const img = document.createElement('img');
+    img.src = player.avatar_url;
+    img.style.cssText='width:52px;height:52px;object-fit:cover;border-radius:50%;';
+    img.onerror = function(){ el.innerHTML=''; el.textContent=letter; el.style.background='var(--accent)'; el.style.color='#000'; };
+    el.innerHTML=''; el.appendChild(img);
+  } else {
+    el.innerHTML=''; el.textContent=player.nickname.charAt(0).toUpperCase();
+  }
+}
+
+// =============================================
+// РЕНДЕР ПОБЕДИТЕЛЯ ТУРНИРА
+// =============================================
+async function renderWinnerSection() {
+  const section = document.getElementById('winner-section');
+  const myPick = await getMyWinnerPick();
+  const allPicksRes = await sb.from('tournament_winner_picks').select('*');
+  const allWPicks = allPicksRes.data || [];
+  const bothPicked = allWPicks.length >= 2;
+  if (myPick) {
+    const otherPick = allWPicks.find(p => p.player_id !== myPlayer?.id);
+    const otherPlayer = allPlayers.find(p => p.id === otherPick?.player_id);
+    let html = '<div class="winner-confirmed"><div class="wc-title">🏆 ТВОЙ ВЫБОР ПОБЕДИТЕЛЯ</div><div class="wc-team">'+myPick.team_name+'</div>';
+    if (bothPicked && otherPick) html += '<div style="font-size:8px;color:#4a6a20;margin-top:6px;">Соперник: '+(otherPlayer?.nickname||'?')+' → '+otherPick.team_name+'</div>';
+    html += '</div>';
+    section.innerHTML = html;
+  } else {
+    section.innerHTML = '<div class="winner-btn" onclick="openWinnerModal()"><div class="winner-icon">🏆</div><div class="winner-info"><div class="winner-title">Победитель турнира</div><div class="winner-sub">Угадай — получи 20 очков</div></div><div class="winner-arrow">›</div></div>';
+  }
+}
+
+async function getMyWinnerPick() {
+  if (!myPlayer) return null;
+  const { data } = await sb.from('tournament_winner_picks').select('*').eq('player_id', myPlayer.id).single();
+  return data;
+}
+
+function openWinnerModal() {
+  const grid = document.getElementById('winner-grid');
+  grid.innerHTML = WINNER_TEAMS.map((t,i) =>
+    '<div class="w-opt" id="wopt-'+i+'" onclick="pickWinner(this,\''+t.name+'\')"><div class="w-opt-flag">'+t.flag+'</div><div class="w-opt-name">'+t.name+'</div></div>'
+  ).join('');
+  selectedWinner = null;
+  document.getElementById('wm-confirm').disabled = true;
+  openModal('m-winner');
+}
+
+function pickWinner(el, name) {
+  document.querySelectorAll('.w-opt').forEach(d => d.classList.remove('selected'));
+  el.classList.add('selected');
+  selectedWinner = name;
+  document.getElementById('wm-confirm').removeAttribute('disabled');
+}
+
+async function submitWinner() {
+  if (!selectedWinner || !myPlayer) return;
+  const btn = document.getElementById('wm-confirm');
+  btn.disabled = true; btn.textContent = 'Сохраняем...';
+  const { error } = await sb.from('tournament_winner_picks').upsert({ player_id: myPlayer.id, team_name: selectedWinner }, { onConflict: 'player_id' });
+  if (error) { toast('Ошибка'); btn.disabled=false; btn.textContent='Подтвердить выбор'; return; }
+  closeModal('m-winner');
+  toast('Выбор сохранён! 🏆');
+  renderWinnerSection();
+}
+
+// =============================================
+// РЕНДЕР МАТЧЕЙ
+// =============================================
+function renderMatches() {
+  const container = document.getElementById('matches-list');
+  const upcoming = matches.filter(m => m.status !== 'FINISHED' && m.status !== 'PENDING');
+  if (upcoming.length === 0) {
+    container.innerHTML = '<div class="empty">Все матчи завершены</div>';
+    return;
+  }
+  const byDate = groupMatchesByDate(upcoming);
+  const MONTHS_LONG = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
+  const DAYS = ['воскресенье','понедельник','вторник','среда','четверг','пятница','суббота'];
+  let html = '';
+  Object.entries(byDate).forEach(([dateKey, dayMatches]) => {
+    const d = new Date(new Date(dayMatches[0].match_date).getTime() + 3*60*60*1000);
+    const now = new Date(new Date().getTime() + 3*60*60*1000);
+    const todayKey = now.getUTCFullYear()+'-'+now.getUTCMonth()+'-'+now.getUTCDate();
+    const tomorrowD = new Date(now.getTime()+86400000);
+    const tomorrowKey = tomorrowD.getUTCFullYear()+'-'+tomorrowD.getUTCMonth()+'-'+tomorrowD.getUTCDate();
+    const dateStr = d.getUTCDate()+' '+MONTHS_LONG[d.getUTCMonth()];
+    const label = dateKey===todayKey?'Сегодня, '+dateStr:dateKey===tomorrowKey?'Завтра, '+dateStr:DAYS[d.getUTCDay()]+', '+dateStr;
+    html += '<div class="date-hdr"><div class="date-hdr-text">'+label+'</div><div class="date-hdr-line"></div></div>';
+    dayMatches.forEach(m => { html += renderMatchCard(m); });
+  });
+  container.innerHTML = html;
+}
+
+function renderMatchCard(m) {
+  const preds = allPreds[m.id] || [];
+  const myPred = myPreds[m.id];
+  const otherPred = preds.find(p => p.player_id !== myPlayer?.id);
+  const bothPredicted = myPred && otherPred;
+  const stageLabel = m.group_name || stageToRu(m.stage);
+  const time = formatTime(m.match_date);
+  const matchStarted = new Date(m.match_date).getTime() <= Date.now();
+  const homeDisplay = m.home_team === 'TBD' ? (m.home_placeholder||'Не определено') : m.home_team;
+  const awayDisplay = m.away_team === 'TBD' ? (m.away_placeholder||'Не определено') : m.away_team;
+  let bottomHtml = '';
+  if (bothPredicted) {
+    const myName = myPlayer?.nickname||'Я';
+    const otherPlayer = allPlayers.find(p => p.id === otherPred.player_id);
+    const otherName = otherPlayer?.nickname||'?';
+    bottomHtml = '<div class="mc-both"><div class="mc-both-label">✓ Оба сделали прогноз</div><div class="mc-both-scores"><div class="mc-both-item"><div class="mc-both-name">'+myName+'</div><div class="mc-both-score">'+myPred.home_score+':'+myPred.away_score+'</div></div><div class="mc-both-item"><div class="mc-both-name">'+otherName+'</div><div class="mc-both-score">'+otherPred.home_score+':'+otherPred.away_score+'</div></div></div></div>';
+  } else {
+    const myName = myPlayer?.nickname||'Я';
+    const myVal = myPred ? myPred.home_score+':'+myPred.away_score : null;
+    const myPts = myPred ? '<div class="mc-pred-val">'+myVal+' ✓</div>' : matchStarted ? '<div class="mc-pred-wait">Время истекло</div>' : '<div class="mc-pred-wait">Сделать →</div>';
+    const otherPts = otherPred ? '<div class="mc-pred-wait">Ждём...</div>' : '<div class="mc-pred-wait">—</div>';
+    const otherPlayer = allPlayers.find(p => p.id !== myPlayer?.id);
+    const otherName = otherPlayer?.nickname||'?';
+    bottomHtml = '<div class="mc-bottom"><div class="mc-pred"><div class="mc-pred-label">'+myName+'</div>'+myPts+'</div><div class="mc-pred"><div class="mc-pred-label">'+otherName+'</div>'+otherPts+'</div></div>';
+  }
+  const clickable = m.status==='SCHEDULED' && !myPred && !matchStarted;
+  const homeNameClass = m.home_team==='TBD'?'mc-tname mc-tname-tbd':'mc-tname';
+  const awayNameClass = m.away_team==='TBD'?'mc-tname mc-tname-tbd':'mc-tname';
+  return '<div class="match-card"'+(clickable?' onclick="openPredict(\''+m.id+'\')"':'')+'>'+
+    '<div class="mc-meta"><div class="mc-badge">'+stageLabel+'</div><div class="mc-time">'+time+'</div></div>'+
+    '<div class="mc-teams">'+
+      '<div class="mc-team"><div class="mc-flag-box">'+flagImg(m.home_team)+'</div><div class="'+homeNameClass+'">'+homeDisplay+'</div></div>'+
+      '<div class="mc-center"><div class="mc-vs">vs</div></div>'+
+      '<div class="mc-team"><div class="mc-flag-box">'+flagImg(m.away_team)+'</div><div class="'+awayNameClass+'">'+awayDisplay+'</div></div>'+
+    '</div>'+bottomHtml+'</div>';
+}
+
+function stageToRu(stage) {
+  const map = {'ROUND_OF_32':'1/16 финала','ROUND_OF_16':'1/8 финала','QUARTER_FINALS':'1/4 финала','SEMI_FINALS':'1/2 финала','THIRD_PLACE':'Матч за 3-е','FINAL':'Финал'};
+  return map[stage] || stage;
+}
+
+// =============================================
+// ПРОГНОЗ
+// =============================================
+async function openPredict(matchId) {
+  currentMatchId = matchId;
+  const m = matches.find(x => x.id === matchId);
+  if (!m) return;
+  if (new Date(m.match_date).getTime() <= Date.now()) { toast('Матч уже начался'); return; }
+  document.getElementById('pm-title').textContent = 'Прогноз';
+  document.getElementById('pm-sub').textContent = m.home_team+' — '+m.away_team+' · '+formatDate(m.match_date)+' · '+formatTime(m.match_date);
+  document.getElementById('pm-flag1').innerHTML = flagImg(m.home_team, 64);
+  document.getElementById('pm-flag2').innerHTML = flagImg(m.away_team, 64);
+  document.getElementById('pm-team1').textContent = m.home_team;
+  document.getElementById('pm-team2').textContent = m.away_team;
+  document.getElementById('pm-s1').value = '';
+  document.getElementById('pm-s2').value = '';
+  document.getElementById('pm-form1').innerHTML = '<div class="form5-label">'+m.home_team+' · последние 5</div><div class="last5"><div class="l5 d">·</div><div class="l5 d">·</div><div class="l5 d">·</div><div class="l5 d">·</div><div class="l5 d">·</div></div>';
+  document.getElementById('pm-form2').innerHTML = '<div class="form5-label">'+m.away_team+' · последние 5</div><div class="last5"><div class="l5 d">·</div><div class="l5 d">·</div><div class="l5 d">·</div><div class="l5 d">·</div><div class="l5 d">·</div></div>';
+  openModal('m-predict');
+  Promise.all([fetchTeamForm(m.home_team), fetchTeamForm(m.away_team)]).then(([f1,f2]) => {
+    if (f1) document.getElementById('pm-form1').innerHTML='<div class="form5-label">'+m.home_team+' · последние 5</div><div class="last5">'+renderForm5(f1)+'</div>';
+    if (f2) document.getElementById('pm-form2').innerHTML='<div class="form5-label">'+m.away_team+' · последние 5</div><div class="last5">'+renderForm5(f2)+'</div>';
+  });
+}
+
+async function submitPredict() {
+  const s1 = document.getElementById('pm-s1').value;
+  const s2 = document.getElementById('pm-s2').value;
+  if (s1===''||s2==='') { toast('Введи счёт'); return; }
+  const m = matches.find(x => x.id === currentMatchId);
+  if (m && new Date(m.match_date).getTime() <= Date.now()) { toast('Матч уже начался'); closeModal('m-predict'); return; }
+  const btn = document.getElementById('pm-confirm');
+  btn.disabled=true; btn.textContent='Сохраняем...';
+  const { error } = await sb.from('predictions').insert({ player_id: myPlayer.id, match_id: currentMatchId, home_score: parseInt(s1), away_score: parseInt(s2) });
+  if (error) { toast('Ошибка: '+error.message); btn.disabled=false; btn.textContent='Подтвердить прогноз'; return; }
+  await loadMyPreds(); await loadAllPreds();
+  closeModal('m-predict');
+  renderMatches();
+  toast('Прогноз сохранён! ⚽');
+  btn.disabled=false; btn.textContent='Подтвердить прогноз';
+}
+
+// =============================================
+// ВКЛАДКА ТАБЛИЦА
+// =============================================
+let currentTableTab = 'bracket';
+
+function switchTableTab(tab) {
+  currentTableTab = tab;
+  document.getElementById('tt-bracket').classList.toggle('active', tab==='bracket');
+  document.getElementById('tt-groups').classList.toggle('active', tab==='groups');
+  if (tab==='bracket') renderBracket();
+  else loadGroupsTable();
+}
+
+async function loadTable() {
+  if (currentTableTab==='bracket') await renderBracket();
+  else await loadGroupsTable();
+}
+
+async function renderBracket() {
+  const el = document.getElementById('table-content');
+  el.innerHTML = '<div class="loader"><div class="spin"></div><div class="loader-text">Загружаем сетку...</div></div>';
+  const { data: koMatches } = await sb.from('matches').select('*').neq('stage','GROUP_STAGE').order('match_date');
+  if (!koMatches||!koMatches.length) { el.innerHTML='<div class="empty">Плей-офф ещё не начался</div>'; return; }
+  const STAGE_ORDER = ['ROUND_OF_32','ROUND_OF_16','QUARTER_FINALS','SEMI_FINALS','FINAL'];
+  const STAGE_LABELS = {'ROUND_OF_32':'1/16 финала','ROUND_OF_16':'1/8 финала','QUARTER_FINALS':'1/4 финала','SEMI_FINALS':'1/2 финала','FINAL':'Финал'};
+  const byStage = {};
+  koMatches.forEach(m => { if (!byStage[m.stage]) byStage[m.stage]=[]; byStage[m.stage].push(m); });
+  let html = '<div class="bracket-wrap"><div style="display:flex;">';
+  STAGE_ORDER.forEach(stage => {
+    const stageMatches = byStage[stage];
+    if (!stageMatches||!stageMatches.length) return;
+    html += '<div class="bracket-stage"><div class="bracket-stage-title">'+STAGE_LABELS[stage]+'</div><div class="bracket-matches">';
+    stageMatches.forEach(m => {
+      const isFinished = m.status==='FINISHED';
+      const homeFlag = m.home_team!=='TBD'?flagImgSmall(m.home_team):'';
+      const awayFlag = m.away_team!=='TBD'?flagImgSmall(m.away_team):'';
+      const homeName = m.home_team==='TBD'?(m.home_placeholder||'—'):m.home_team;
+      const awayName = m.away_team==='TBD'?(m.away_placeholder||'—'):m.away_team;
+      const homeIsTbd = m.home_team==='TBD', awayIsTbd = m.away_team==='TBD';
+      let homeWC='', awayWC='';
+      let homeNC = homeIsTbd?'bracket-team-name tbd':'bracket-team-name';
+      let awayNC = awayIsTbd?'bracket-team-name tbd':'bracket-team-name';
+      if (isFinished) {
+        if (m.home_score>m.away_score) { homeWC=' winner'; homeNC+=' winner-name'; }
+        else if (m.away_score>m.home_score) { awayWC=' winner'; awayNC+=' winner-name'; }
+      }
+      const dateStr = formatDate(m.match_date)+' · '+formatTime(m.match_date);
+      html += '<div class="bracket-match'+(isFinished?' has-winner':'')+'">'+
+        '<div class="bracket-team'+homeWC+'">'+homeFlag+'<div class="'+homeNC+'">'+homeName+'</div>'+(isFinished?'<div class="bracket-score">'+m.home_score+'</div>':'')+'</div>'+
+        '<div class="bracket-vs-line"></div>'+
+        '<div class="bracket-team'+awayWC+'">'+awayFlag+'<div class="'+awayNC+'">'+awayName+'</div>'+(isFinished?'<div class="bracket-score">'+m.away_score+'</div>':'')+'</div>'+
+        (!isFinished&&!homeIsTbd&&!awayIsTbd?'<div class="bracket-date">'+dateStr+'</div>':'')+
+      '</div>';
+    });
+    html += '</div></div>';
+  });
+  html += '</div></div>';
+  el.innerHTML = html;
+}
+
+function flagImgSmall(teamName) {
+  const code = FLAG_CODE[teamName];
+  if (!code) return '<span style="font-size:11px;">🏳</span>';
+  let src;
+  if (code==='gb-sct') src='https://flagicons.lipis.dev/flags/4x3/gb-sct.svg';
+  else if (code==='gb-eng') src='https://flagicons.lipis.dev/flags/4x3/gb-eng.svg';
+  else src='https://flagcdn.com/'+code+'.svg';
+  return '<img src="'+src+'" class="bracket-team-flag">';
+}
+
+async function loadGroupsTable() {
+  const el = document.getElementById('table-content');
+  el.innerHTML = '<div class="loader"><div class="spin"></div><div class="loader-text">Считаем таблицу...</div></div>';
+  const { data: finishedMatches } = await sb.from('matches').select('*').eq('status','FINISHED').eq('stage','GROUP_STAGE');
+  const { data: allGroupMatches } = await sb.from('matches').select('home_team,away_team,group_name').eq('stage','GROUP_STAGE');
+  const groups = {};
+  (allGroupMatches||[]).forEach(m => {
+    const g = m.group_name; if (!groups[g]) groups[g]=new Set();
+    groups[g].add(m.home_team); groups[g].add(m.away_team);
+  });
+  const stats = {};
+  Object.values(groups).forEach(teams => teams.forEach(t => { if (!stats[t]) stats[t]={played:0,w:0,d:0,l:0,gf:0,ga:0,pts:0}; }));
+  (finishedMatches||[]).forEach(m => {
+    const h=m.home_team,a=m.away_team,hs=m.home_score,as_=m.away_score;
+    if (!stats[h]) stats[h]={played:0,w:0,d:0,l:0,gf:0,ga:0,pts:0};
+    if (!stats[a]) stats[a]={played:0,w:0,d:0,l:0,gf:0,ga:0,pts:0};
+    stats[h].played++; stats[a].played++;
+    stats[h].gf+=hs; stats[h].ga+=as_; stats[a].gf+=as_; stats[a].ga+=hs;
+    if (hs>as_) { stats[h].w++; stats[h].pts+=3; stats[a].l++; }
+    else if (hs<as_) { stats[a].w++; stats[a].pts+=3; stats[h].l++; }
+    else { stats[h].d++; stats[h].pts++; stats[a].d++; stats[a].pts++; }
+  });
+  const sortedGroups = Object.entries(groups).sort((a,b)=>a[0].localeCompare(b[0]));
+  let html = '';
+  sortedGroups.forEach(([groupName,teamsSet]) => {
+    const teams = [...teamsSet].map(t=>({name:t,...stats[t]})).sort((a,b)=>b.pts-a.pts||(b.gf-b.ga)-(a.gf-a.ga)||b.gf-a.gf);
+    html += '<div class="group-block"><div class="group-label">'+groupName+'</div><div class="group-table"><div class="gt-head"><div class="gt-hcol">#</div><div class="gt-hcol left">Команда</div><div class="gt-hcol">И</div><div class="gt-hcol">В</div><div class="gt-hcol">Н</div><div class="gt-hcol">П</div><div class="gt-hcol">О</div></div>';
+    teams.forEach((t,i) => {
+      const s=stats[t.name]||{played:0,w:0,d:0,l:0,pts:0};
+      const code=FLAG_CODE[t.name];
+      const flagHtml=code?'<img src="https://flagcdn.com/'+code+'.svg" style="width:24px;height:16px;object-fit:cover;border-radius:2px;flex-shrink:0;">':'<span style="font-size:14px;">🏳</span>';
+      html += '<div class="gt-row"><div class="gt-pos '+(i<2?'q':'')+'">'+(i+1)+'</div><div class="gt-team-cell">'+flagHtml+'<span class="gt-tname">'+t.name+'</span></div><div class="gt-cell">'+s.played+'</div><div class="gt-cell">'+s.w+'</div><div class="gt-cell">'+s.d+'</div><div class="gt-cell">'+s.l+'</div><div class="gt-pts">'+s.pts+'</div></div>';
+    });
+    html += '</div></div>';
+  });
+  if (!html) html='<div class="empty">Нет данных</div>';
+  html += '<div class="legend-row"><div class="legend-dot"></div><div class="legend-text">Топ-2 каждой группы + лучшие 3-и места выходят в плей-офф</div></div>';
+  el.innerHTML = html;
+}
+
+// =============================================
+// ИСТОРИЯ
+// =============================================
+async function loadHistory() {
+  const content = document.getElementById('history-content');
+  const finished = matches.filter(m => m.status==='FINISHED' && m.stage==='GROUP_STAGE' || m.status==='FINISHED' && m.stage!=='GROUP_STAGE');
+  if (finished.length===0) { content.innerHTML='<div class="empty">Завершённых матчей пока нет</div>'; return; }
+  await loadAllPoints();
+  const byDate = groupMatchesByDate(finished.slice().reverse());
+  let html = '';
+  Object.entries(byDate).forEach(([dateKey,dayMatches]) => {
+    const d = new Date(new Date(dayMatches[0].match_date).getTime()+3*60*60*1000);
+    const MONTHS_LONG=['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
+    html += '<div class="date-hdr"><div class="date-hdr-text">'+d.getUTCDate()+' '+MONTHS_LONG[d.getUTCMonth()]+'</div><div class="date-hdr-line"></div></div>';
+    dayMatches.forEach(m => { html += renderHistCard(m); });
+    const dayTotals = {};
+    allPlayers.forEach(p => { dayTotals[p.id]=0; });
+    dayMatches.forEach(m => { (allPoints[m.id]||[]).forEach(pt => { if (dayTotals[pt.player_id]!==undefined) dayTotals[pt.player_id]+=pt.pts; }); });
+    html += '<div style="margin:0 12px 8px;background:var(--green-bg);border-radius:14px;border:1px solid var(--green-border);padding:12px 16px;display:flex;justify-content:space-between;align-items:center;"><div style="font-size:9px;color:#4a6a20;font-weight:700;">ИТОГ ДНЯ</div><div style="display:flex;gap:20px;">';
+    allPlayers.forEach(p => {
+      const pts=dayTotals[p.id]||0;
+      html += '<div style="text-align:center;"><div style="font-size:8px;color:#4a6a20;">'+p.nickname+'</div><div style="font-size:20px;font-weight:900;color:var(--accent);">'+(pts>0?'+':'')+pts+'</div></div>';
+    });
+    html += '</div></div>';
+  });
+  content.innerHTML = html;
+}
+
+function renderHistCard(m) {
+  const pts = allPoints[m.id]||[];
+  const preds = allPreds[m.id]||[];
+  let html = '<div class="hist-card"><div class="hc-top"><div class="hc-match">'+m.home_team+' — '+m.away_team+'</div><div class="hc-result">'+m.home_score+' : '+m.away_score+'</div></div><div class="hc-preds">';
+  allPlayers.forEach(p => {
+    const pred=preds.find(x=>x.player_id===p.id);
+    const ptRow=pts.find(x=>x.player_id===p.id);
+    const ptVal=ptRow?ptRow.pts:0;
+    const reason=ptRow?ptRow.reason:'wrong';
+    html += '<div class="hc-pred"><div class="hc-pred-name">'+p.nickname+'</div>';
+    if (pred) html += '<div class="hc-pred-score '+ptsColor(ptVal)+'">'+pred.home_score+' : '+pred.away_score+'</div>';
+    else html += '<div class="hc-pred-score pts-m1">—</div>';
+    html += '<div class="hc-pts '+ptsColor(ptVal)+'">'+ptsLabel(ptVal,reason)+'</div></div>';
+  });
+  html += '</div></div>';
+  return html;
+}
+
+function ptsColor(pts) {
+  if (pts===5) return 'pts-5';
+  if (pts===3) return 'pts-3';
+  if (pts===1) return 'pts-1';
+  if (pts===-1) return 'pts-m1';
+  return 'pts-0';
+}
+
+function ptsLabel(pts, reason) {
+  if (pts===5) return '+5 ★ точный счёт';
+  if (pts===3) return '+3 ближе к счёту';
+  if (pts===1) return '+1 угадал исход';
+  if (pts===-1) return '−1 не внёс прогноз';
+  return '0 очков';
+}
+
+// =============================================
+// ОБНОВЛЕНИЕ АВАТАРКИ С ГЛАВНОГО ЭКРАНА
+// =============================================
+function openAvatarUpdate() { document.getElementById('avatar-update-file').click(); }
+
+function handleAvatarUpdate(input) {
+  if (!input.files[0]) return;
+  avatarFile = input.files[0];
+  const reader = new FileReader();
+  reader.onload = e => {
+    const src = e.target.result;
+    const img = document.getElementById('crop-img');
+    const imgBg = document.getElementById('crop-img-bg');
+    img.src = src; imgBg.src = src;
+    img.onload = () => {
+      cropScale = CROP_SIZE / Math.min(img.naturalWidth, img.naturalHeight);
+      cropX = (CROP_SIZE - img.naturalWidth*cropScale)/2;
+      cropY = (CROP_SIZE - img.naturalHeight*cropScale)/2;
+      document.getElementById('crop-slider').value=100;
+      applyCropTransform();
+      document.getElementById('crop-overlay').dataset.mode='update';
+      document.getElementById('crop-overlay').style.display='flex';
+      setTimeout(initCropDrag,30);
+    };
+  };
+  reader.readAsDataURL(avatarFile);
+  input.value='';
+}
+
+window.applyCrop = async function() {
+  const mode = document.getElementById('crop-overlay').dataset.mode;
+  const img = document.getElementById('crop-img');
+  const canvas = document.createElement('canvas');
+  const size=400; canvas.width=size; canvas.height=size;
+  const ctx=canvas.getContext('2d');
+  ctx.beginPath(); ctx.arc(size/2,size/2,size/2,0,Math.PI*2); ctx.clip();
+  const ratio=size/CROP_SIZE;
+  ctx.drawImage(img,cropX*ratio,cropY*ratio,img.naturalWidth*cropScale*ratio,img.naturalHeight*cropScale*ratio);
+  myAvatarBase64 = canvas.toDataURL('image/jpeg',0.88);
+  document.getElementById('crop-overlay').style.display='none';
+  if (mode==='update' && myPlayer) {
+    toast('Загружаем фото...');
+    const url = await uploadAvatarBase64(myPlayer.nickname, myAvatarBase64);
+    if (url) {
+      await sb.from('players').update({avatar_url:url}).eq('id',myPlayer.id);
+      myPlayer.avatar_url=url;
+      const idx=allPlayers.findIndex(p=>p.id===myPlayer.id);
+      if (idx>=0) allPlayers[idx].avatar_url=url;
+      renderAvatar('sb-av1',myPlayer);
+      toast('Фото обновлено ✓');
+    } else { toast('Ошибка загрузки фото'); }
+    document.getElementById('crop-overlay').dataset.mode='';
+  } else {
+    const circle=document.getElementById('onb-avatar-circle');
+    circle.innerHTML='<img src="'+myAvatarBase64+'" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
+    document.querySelector('.onb-hint').textContent='Нажми чтобы изменить';
+  }
+};
+
+// =============================================
+// СТАРТ
+// =============================================
+init();
+</script>
+</body>
+</html>
