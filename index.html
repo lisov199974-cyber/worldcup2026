@@ -1521,10 +1521,15 @@ async function loadGroupsTable() {
 // =============================================
 async function loadHistory() {
   const content = document.getElementById('history-content');
-  const finished = matches.filter(m => m.status==='FINISHED' && m.stage==='GROUP_STAGE' || m.status==='FINISHED' && m.stage!=='GROUP_STAGE');
+  const finished = matches.filter(m => m.status==='FINISHED');
   if (finished.length===0) { content.innerHTML='<div class="empty">Завершённых матчей пока нет</div>'; return; }
   await loadAllPoints();
-  const byDate = groupMatchesByDate(finished.slice().reverse());
+  
+  // Показываем только матчи где есть хотя бы один предикт
+  const withPreds = finished.filter(m => (allPreds[m.id] || []).length > 0);
+  if (withPreds.length===0) { content.innerHTML='<div class="empty">Прогнозов пока нет</div>'; return; }
+  
+  const byDate = groupMatchesByDate(withPreds.slice().reverse());
   let html = '';
   Object.entries(byDate).forEach(([dateKey,dayMatches]) => {
     const d = new Date(new Date(dayMatches[0].match_date).getTime()+3*60*60*1000);
