@@ -1014,13 +1014,14 @@ async function syncMatchResults() {
 }
 
 // =============================================
-// ПРОДВИЖЕНИЕ ПОБЕДИТЕЛЯ В СЕТКЕ ПЛЕЙ-ОФФ
+// ПРОДВИЖЕНИЕ ПОБЕДИТЕЛЯ / ПРОИГРАВШЕГО В СЕТКЕ ПЛЕЙ-ОФФ
 // =============================================
 
 // FIFA 2026 fixed bracket (official from FIFA.com/CBS/FOX Sports)
 // Match numbers: 89=ko17, 90=ko18, 91=ko19, 92=ko20, 93=ko21, 94=ko22, 95=ko23, 96=ko24
 // QF: 97=ko25(Boston), 98=ko26(LA), 99=ko27(Miami), 100=ko28(KC)
 // SF: 101=ko29(Dallas), 102=ko30(Atlanta)
+// M103=ko3rd — матч за 3-е место (Майами, 18 июля), M104=ko31 — Финал (Нью-Джерси, 19 июля)
 const FIFA_BRACKET = {
   // Round of 32 -> Round of 16 (per official FIFA bracket)
   'ko1':  { next: 'ko17', slot: 'away' }, // Canada -> ko17 away
@@ -1064,50 +1065,68 @@ const FIFA_BRACKET = {
   'ko30': { next: 'ko31', slot: 'away' },
 };
 
+// Проигравшие полуфиналов -> матч за 3-е место (ko3rd, Майами, 18 июля)
+const LOSER_BRACKET = {
+  'ko29': { next: 'ko3rd', slot: 'home' },
+  'ko30': { next: 'ko3rd', slot: 'away' },
+};
+
+// Ставит команду в указанный слот следующего матча
+// (общий помощник: победители идут по FIFA_BRACKET, проигравшие полуфиналов — по LOSER_BRACKET)
+async function advanceTeamTo(nextId, slot, teamName, teamFlag) {
+  if (!teamName || teamName === 'TBD') return;
+  const { data: nextMatch } = await sb.from('matches').select('*').eq('id', nextId).single();
+  if (!nextMatch) return; // матч ещё не создан в БД (например ko3rd до SQL-вставки)
+
+  const currentVal = slot === 'home' ? nextMatch.home_team : nextMatch.away_team;
+  if (currentVal === teamName) return; // уже стоит правильно
+
+  const updateField = slot === 'home'
+    ? { home_team: teamName, home_flag: teamFlag }
+    : { away_team: teamName, away_flag: teamFlag };
+
+  const otherVal = slot === 'home' ? nextMatch.away_team : nextMatch.home_team;
+  const newStatus = (otherVal && otherVal !== 'TBD' && otherVal !== '') ? 'SCHEDULED' : 'PENDING';
+
+  await sb.from('matches').update({ ...updateField, status: newStatus }).eq('id', nextId);
+  console.log('Advanced', teamName, '->', nextId, slot);
+}
+
 async function advanceWinner(match, homeScore, awayScore, apiMatch) {
   try {
     const bracketEntry = FIFA_BRACKET[match.id];
-    if (!bracketEntry) return;
+    const loserEntry = LOSER_BRACKET[match.id];
+    if (!bracketEntry && !loserEntry) return;
 
-    let winnerName, winnerFlag;
+    let winnerName, winnerFlag, loserName, loserFlag;
 
     if (homeScore > awayScore) {
       winnerName = match.home_team; winnerFlag = match.home_flag;
+      loserName  = match.away_team; loserFlag  = match.away_flag;
     } else if (awayScore > homeScore) {
       winnerName = match.away_team; winnerFlag = match.away_flag;
+      loserName  = match.home_team; loserFlag  = match.home_flag;
     } else {
       // Draw — check penalties from API
       const pens = apiMatch?.score?.penalties;
       if (pens && pens.home !== null && pens.away !== null) {
         if (pens.home > pens.away) {
           winnerName = match.home_team; winnerFlag = match.home_flag;
+          loserName  = match.away_team; loserFlag  = match.away_flag;
         } else {
           winnerName = match.away_team; winnerFlag = match.away_flag;
+          loserName  = match.home_team; loserFlag  = match.home_flag;
         }
       } else {
-        // Can't determine yet
+        // Can't determine yet — пенальти появятся на следующем sync
         return;
       }
     }
 
-    if (winnerName === 'TBD') return;
-
-    const { next, slot } = bracketEntry;
-    const { data: nextMatch } = await sb.from('matches').select('*').eq('id', next).single();
-    if (!nextMatch) return;
-
-    const currentVal = slot === 'home' ? nextMatch.home_team : nextMatch.away_team;
-    if (currentVal === winnerName) return; // already set correctly
-
-    const updateField = slot === 'home'
-      ? { home_team: winnerName, home_flag: winnerFlag }
-      : { away_team: winnerName, away_flag: winnerFlag };
-
-    const otherVal = slot === 'home' ? nextMatch.away_team : nextMatch.home_team;
-    const newStatus = (otherVal !== 'TBD' && otherVal !== '') ? 'SCHEDULED' : 'PENDING';
-
-    await sb.from('matches').update({ ...updateField, status: newStatus }).eq('id', next);
-    console.log('Advanced', winnerName, '->', next, slot);
+    // Победитель идёт дальше по основной сетке
+    if (bracketEntry) await advanceTeamTo(bracketEntry.next, bracketEntry.slot, winnerName, winnerFlag);
+    // Проигравший полуфинала идёт на матч за 3-е место
+    if (loserEntry) await advanceTeamTo(loserEntry.next, loserEntry.slot, loserName, loserFlag);
   } catch(e) {
     console.error('Advance winner error:', e);
   }
@@ -1429,8 +1448,8 @@ async function renderBracket() {
   el.innerHTML = '<div class="loader"><div class="spin"></div><div class="loader-text">Загружаем сетку...</div></div>';
   const { data: koMatches } = await sb.from('matches').select('*').neq('stage','GROUP_STAGE').order('match_date');
   if (!koMatches||!koMatches.length) { el.innerHTML='<div class="empty">Плей-офф ещё не начался</div>'; return; }
-  const STAGE_ORDER = ['ROUND_OF_32','ROUND_OF_16','QUARTER_FINALS','SEMI_FINALS','FINAL'];
-  const STAGE_LABELS = {'ROUND_OF_32':'1/16 финала','ROUND_OF_16':'1/8 финала','QUARTER_FINALS':'1/4 финала','SEMI_FINALS':'1/2 финала','FINAL':'Финал'};
+  const STAGE_ORDER = ['ROUND_OF_32','ROUND_OF_16','QUARTER_FINALS','SEMI_FINALS','THIRD_PLACE','FINAL'];
+  const STAGE_LABELS = {'ROUND_OF_32':'1/16 финала','ROUND_OF_16':'1/8 финала','QUARTER_FINALS':'1/4 финала','SEMI_FINALS':'1/2 финала','THIRD_PLACE':'Матч за 3-е место','FINAL':'Финал'};
   const byStage = {};
   koMatches.forEach(m => { if (!byStage[m.stage]) byStage[m.stage]=[]; byStage[m.stage].push(m); });
   let html = '<div class="bracket-wrap"><div style="display:flex;">';
@@ -1556,12 +1575,17 @@ function renderHistCard(m) {
   allPlayers.forEach(p => {
     const pred=preds.find(x=>x.player_id===p.id);
     const ptRow=pts.find(x=>x.player_id===p.id);
-    const ptVal=ptRow?ptRow.pts:0;
-    const reason=ptRow?ptRow.reason:'wrong';
     html += '<div class="hc-pred"><div class="hc-pred-name">'+p.nickname+'</div>';
-    if (pred) html += '<div class="hc-pred-score '+ptsColor(ptVal)+'">'+pred.home_score+' : '+pred.away_score+'</div>';
+    if (pred) html += '<div class="hc-pred-score '+(ptRow?ptsColor(ptRow.pts):'pts-0')+'">'+pred.home_score+' : '+pred.away_score+'</div>';
     else html += '<div class="hc-pred-score pts-m1">—</div>';
-    html += '<div class="hc-pts '+ptsColor(ptVal)+'">'+ptsLabel(ptVal,reason)+'</div></div>';
+    // Если очки ещё не посчитаны (фоновый sync не успел) — показываем
+    // "считаем", а не обманчивые "0 очков"
+    if (ptRow) {
+      html += '<div class="hc-pts '+ptsColor(ptRow.pts)+'">'+ptsLabel(ptRow.pts, ptRow.reason)+'</div>';
+    } else if (pred) {
+      html += '<div class="hc-pts pts-0">⏳ считаем очки...</div>';
+    }
+    html += '</div>';
   });
   html += '</div></div>';
   return html;
